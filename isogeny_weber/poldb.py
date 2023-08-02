@@ -65,7 +65,7 @@ class Database:
             from sage.misc.verbose import verbose
 
             minl, maxl = min(offs), max(offs)
-            print(
+            verbose(
                 f"Read polynomial database from {filename} (size {off} levels {minl}..{maxl})"
             )
         except ImportError:
@@ -98,6 +98,9 @@ class Database:
             poly[(dx, dy)] = a
             poly[(dy, dx)] = a
         return Zxy(poly)
+
+    def keys(self):
+        return self._offs.keys()
 
     def modular_polynomial(self, l, base_ring=None, y=None):
         """
