@@ -4,15 +4,12 @@ polynomials.
 """
 
 from sage.all import ZZ, EllipticCurve, polygen, cputime
-from sage.schemes.elliptic_curves.ell_curve_isogeny import (
-    compute_isogeny_kernel_polynomial,
-)
 from sage.misc.verbose import verbose
 
 from .poldb import Database
 
 
-def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False):
+def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=True):
     """
     Returns an iterator over outgoing isogenies of degree l
     with domain E.
@@ -34,7 +31,13 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False):
     eqf = (x**24 - 16) ** 3 - j * x**24
     eqf2 = min((_f for _f, _ in eqf.factor()), key=lambda _f: _f.degree())
     Kext = eqf2.splitting_field("f")
-    f = _fast_pari_roots(eqf2.change_ring(Kext))[0][0]
+    f = None
+    for r, _ in _fast_pari_roots(((x - 16) ** 3 - j * x).change_ring(Kext)):
+        try:
+            f = r.nth_root(24)
+        except ValueError:
+            continue
+    assert f is not None and eqf(f) == 0
     verbose(f"domain j={j}")
     verbose(f"f-invariant in field {Kext}")
     wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
@@ -68,9 +71,10 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False):
             E2 = EllipticCurve(K, [l**4 * mm * kk / 48, l**6 * mm**2 * kk / 864])
             assert E2.j_invariant() == j2
             t0 = cputime()
-            ker = compute_isogeny_kernel_polynomial(E, E2, l)
+            ker = _fast_elkies(E, E2, l)
+            assert ker.degree() == (l - 1) // 2
             verbose(f"computed normalized isogeny of degree {l}", t=t0)
-            yield E.isogeny(ker, codomain=E2, degree=l)
+            yield E.isogeny(ker, codomain=E2, degree=l, check=check)
 
 
 _DEBUG = False
@@ -181,3 +185,53 @@ def _fast_pari_roots(poly):
     paripoly = poly._pari_with_name()
     R = poly.base_ring()
     return [(R(r), 1) for r in paripoly.polrootsmod()]
+
+
+def _fast_elkies(E1, E2, l):
+    """
+    Compute the unique normalized isogeny of degree l between E1 and E2
+
+    This is the fastElkies' algorithm from:
+
+    Bostan, Salvy, Morain, Schost
+    Fast algorithms for computing isogenies between elliptic curves
+    https://arxiv.org/pdf/cs/0609020.pdf
+    """
+    Rx, x = E1.base_ring()["x"].objgen()
+    # Compute C = 1/(1 + Ax^4 + Bx^6) mod x^4l
+    A, B = E1.a4(), E1.a6()
+    C = (1 + A * x**4 + B * x**6).inverse_series_trunc(4 * l)
+    # Solve differential equation
+    # The number of terms doubles at each iteration.
+    # S'^2 = G(x,S) = (1 + A2 S^4 + B2 S^6) / (1 + Ax^4 + Bx^6)
+    # S = x + O(x^2)
+    A2, B2 = E2.a4(), E2.a6()
+    S = x + (A2 - A) / 10 * x**5 + (B2 - B) / 14 * x**7
+    sprec = 8
+    while sprec < 4 * l:
+        assert sprec % 2 == 0
+        if sprec > 2 * l:
+            sprec = 2 * l
+        # s1 => s1 + x^k s2
+        # 2 s1' s2' - dG/dS(x, s1) s2 = G(x, s1) - s1'2
+        s1 = Rx(S).truncate(sprec)
+        ds1 = s1.derivative()
+        s1pows = s1.add_bigoh(2 * sprec).powers(7)
+        GS = C * (1 + A2 * s1pows[4] + B2 * s1pows[6])
+        dGS = C * (4 * A2 * s1pows[3] + 6 * B2 * s1pows[5])
+        # s2' = (dGS / 2s1') s2 + (G(x, s1) - s1'2) / (2s1')
+        denom = (2 * ds1).inverse_series_trunc(2 * sprec)
+        a = dGS * denom
+        b = (GS - ds1**2) * denom
+        s2 = a.solve_linear_de(prec=2 * sprec, b=b, f0=0)
+        S = s1 + s2
+        sprec = 2 * sprec
+    # Reconstruct:
+    # S = x * T(x^2)
+    # Compute U = 1/T^2
+    # Reconstruct N(1/x) / D(1/x) = U
+    T = Rx([S[2 * i + 1] for i in range(2 * l)]).add_bigoh(2 * l)
+    U = 1 / T**2
+    _, Q = Rx(U).rational_reconstruction(x ** (2 * l), l, l)
+    Q = Q.add_bigoh((l + 1) // 2).sqrt()
+    return Rx(Q).reverse().monic()

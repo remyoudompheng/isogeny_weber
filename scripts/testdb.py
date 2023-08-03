@@ -6,7 +6,13 @@ linked by the modular polynomials.
 import argparse
 import time
 
-from sage.all import GF, EllipticCurve_from_j, random_prime, set_verbose
+from sage.all import (
+    GF,
+    EllipticCurve_from_j,
+    random_prime,
+    legendre_symbol,
+    set_verbose,
+)
 from isogeny_weber import Database, isogenies_prime_degree_weber
 
 if __name__ == "__main__":
@@ -33,11 +39,16 @@ if __name__ == "__main__":
                 f = K.random_element()
                 j = (f**24 - 16) ** 3 / f**24
                 E = EllipticCurve_from_j(j)
-                wp = weber_db.modular_polynomial(l, base_ring=K, y=f)
+                D = E.trace_of_frobenius() ** 2 - 4 * p
                 phis = list(isogenies_prime_degree_weber(E, l, weber_db))
-                j2s = [(_f**24 - 16) ** 3 / _f**24 for _f, _ in wp.roots()]
-                if j2s:
+                if len(phis) == l + 1:
+                    # May happen sometimes
+                    assert E.is_supersingular() or legendre_symbol(D, l) == 0
+                    # assert l + 1 == len(E.isogenies_prime_degree(l))
+                else:
+                    # Is l an Atkin/Elkies prime?
+                    assert len(phis) == legendre_symbol(D, l) + 1, (D, l, phis)
+                if phis:
                     count += 1
-                    points += len(wp.roots())
-                assert set(phi.codomain().j_invariant() for phi in phis) == set(j2s)
+                    points += len(phis)
         print(f"\nTested level {l} in {time.time()-t0:.3f}s ({points} modular points)")
