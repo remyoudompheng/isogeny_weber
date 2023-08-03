@@ -40,7 +40,7 @@ def fast_adams2(p):
 
 def main(bits, e, d):
     print(f"p{bits}^{e}, degree {d}")
-    p = random_prime(2 ** (bits - 1), 2**bits)
+    p = random_prime(2**bits, lbound=2 ** (bits - 1))
     Kx = PolynomialRing(GF((p, e), "g"), "x")
     pol = Kx.random_element(d).monic()
     # Fast
@@ -75,16 +75,16 @@ def main(bits, e, d):
     q = pol.roots()
     print(f"roots {cputime(t):.6f}s")
 
-
-main(30, 1, 400)
-main(30, 6, 400)
-main(30, 24, 400)
-main(64, 1, 400)
-main(64, 6, 400)
-main(64, 24, 400)
-main(65, 1, 400)
-main(65, 6, 400)
-main(65, 24, 400)
-main(256, 1, 400)
-main(256, 6, 400)
-main(256, 24, 400)
+if __name__ == "__main__":
+    main(30, 1, 400)
+    main(30, 6, 400)
+    main(30, 24, 400)
+    main(64, 1, 400)
+    main(64, 6, 400)
+    main(64, 24, 400)
+    main(65, 1, 400)
+    main(65, 6, 400)
+    main(65, 24, 400)
+    main(256, 1, 400)
+    main(256, 6, 400)
+    main(256, 24, 400)

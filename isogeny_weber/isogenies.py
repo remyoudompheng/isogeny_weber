@@ -25,6 +25,8 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
     j = E.j_invariant()
     if not only_j and (j == K(0) or j == K(1728)):
         raise ValueError(f"j-invariant must not be 0 or 1728")
+    if K.characteristic() <= 4 * l:
+        raise ValueError(f"Characteristic is too small (needs char K > 4l)")
 
     A, B = E.a4(), E.a6()
     x = polygen(K)
@@ -53,7 +55,7 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
             for _ in range(mult):
                 yield j2
         else:
-            if mult > 1:
+            if j2 == 0 or j2 == 1728 or mult > 1:
                 raise ValueError(f"Target j-invariant must not be 0 or 1728")
             # Compute equation of normalized codomain and apply Stark algorithm
             # Sutherland, On the evaluation of modular polynomials, section 3.8
@@ -72,7 +74,7 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
             assert E2.j_invariant() == j2
             t0 = cputime()
             ker = _fast_elkies(E, E2, l)
-            assert ker.degree() == (l - 1) // 2
+            assert ker.degree() == (l - 1) // 2, f"{l=} kernel degree {ker.degree()}\nE1: {E}\nE2: {E2}"
             verbose(f"computed normalized isogeny of degree {l}", t=t0)
             yield E.isogeny(ker, codomain=E2, degree=l, check=check)
 
@@ -196,6 +198,13 @@ def _fast_elkies(E1, E2, l):
     Bostan, Salvy, Morain, Schost
     Fast algorithms for computing isogenies between elliptic curves
     https://arxiv.org/pdf/cs/0609020.pdf
+
+    >>> from sage.all import GF, EllipticCurve
+    >>> E1 = EllipticCurve(GF(167), [153, 112])
+    >>> E2 = EllipticCurve(GF(167), [56, 40])
+    >>> _fast_elkies(E1, E2, 13)
+    x^6 + 139*x^5 + 73*x^4 + 139*x^3 + 120*x^2 + 88*x
+
     """
     Rx, x = E1.base_ring()["x"].objgen()
     # Compute C = 1/(1 + Ax^4 + Bx^6) mod x^4l
@@ -234,4 +243,8 @@ def _fast_elkies(E1, E2, l):
     U = 1 / T**2
     _, Q = Rx(U).rational_reconstruction(x ** (2 * l), l, l)
     Q = Q.add_bigoh((l + 1) // 2).sqrt()
-    return Rx(Q).reverse().monic()
+    # Beware, reversing may not give the correct degree.
+    ker = Rx(Q / Q[0]).reverse()
+    if ker.degree() < (l - 1) // 2:
+        ker = ker.shift((l - 1) // 2 - ker.degree())
+    return ker.monic()

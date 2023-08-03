@@ -18,6 +18,7 @@ from isogeny_weber import Database, isogenies_prime_degree_weber
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
     argp.add_argument("-v", action="store_true")
+    argp.add_argument("PBITS", type=int, help="modulus size")
     argp.add_argument("DATABASE", nargs="?", help="Path to Weber polynomial database")
     args = argp.parse_args()
 
@@ -31,13 +32,16 @@ if __name__ == "__main__":
         points = 0
         for _ in range(3):
             # Test 3 primes and 10 values per prime
-            p = random_prime(2**30)
+            p = random_prime(2**args.PBITS, lbound=2**(args.PBITS-1))
+            if p <= 4 * l:
+                continue
             K = GF(p)
             print(p, end=" ")
             count = 0
             while count < 10:
-                f = K.random_element()
-                j = (f**24 - 16) ** 3 / f**24
+                j = 0
+                while j == 0 or j == 1728:
+                    j = K.random_element()
                 E = EllipticCurve_from_j(j)
                 D = E.trace_of_frobenius() ** 2 - 4 * p
                 phis = list(isogenies_prime_degree_weber(E, l, weber_db))

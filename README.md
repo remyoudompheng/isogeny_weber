@@ -18,6 +18,10 @@ in any serious research or computation.
 
 # Example code
 
+The library only processes elliptic curves defined over finite fields,
+with large enough characteristic (`p > 4*l`). Isogenies involving
+special curves `j=0` and `j=1728` are not supported.
+
 ```python
 sage: from isogeny_weber import Database, isogenies_prime_degree_weber
 
