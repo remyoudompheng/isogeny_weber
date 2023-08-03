@@ -109,7 +109,7 @@ if __name__ == "__main__":
         for i in args.INPUT:
             if i.endswith(".tar.gz"):
                 tf = tarfile.TarFile(fileobj=io.BytesIO(gzip.GzipFile(i).read()))
-                process_tar(w, tf)
+                process_tar(w, tf, limit=args.limit)
             else:
                 off = w.tell()
                 with (gzip.open if i.endswith(".gz") else open)(i, "rb") as f:

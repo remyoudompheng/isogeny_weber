@@ -8,6 +8,8 @@ as the file size.
 
 import struct
 
+from .poldb128 import DB128
+
 
 def _parse_header(s, off):
     hdr = int.from_bytes(s[off : off + 4], "big")
@@ -42,9 +44,16 @@ def _parse_header(s, off):
 
 
 class Database:
-    def __init__(self, filename):
-        with open(filename, "rb") as f:
-            db = f.read()
+    def __init__(self, filename=None):
+        """
+        Load a Weber modular polynomial database from a file,
+        or load hardcoded database for 5 <= l <= 127 if not specified.
+        """
+        if filename is not None:
+            with open(filename, "rb") as f:
+                db = f.read()
+        else:
+            db = DB128
         off = 0
         offs = {}
         l = None

@@ -9,8 +9,10 @@ from sage.schemes.elliptic_curves.ell_curve_isogeny import (
 )
 from sage.misc.verbose import verbose
 
+from .poldb import Database
 
-def isogenies_prime_degree_weber(E, l, weber_db, only_j=False):
+
+def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False):
     """
     Returns an iterator over outgoing isogenies of degree l
     with domain E.
