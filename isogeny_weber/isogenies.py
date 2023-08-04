@@ -109,35 +109,33 @@ def _weber_poly_roots(wpoly, Kbase, f, j):
         K24 = Kbase
         power = next(i for i in (1, 2, 3, 4, 6, 8, 12, 24) if (f**i) in Kbase)
     else:
-        # f24 is either in a quadratic or cubic extension of Kbase
+        # This is only possible if (X-16)^3-jX is irreducible.
         extdeg = Kf.degree() // Kbase.degree()
-        if extdeg % 2 == 0 and f24 in Kf.subfield(2 * Kbase.degree()):
-            K24 = Kf.subfield(2 * Kbase.degree())
-        else:
-            K24 = Kf.subfield(3 * Kbase.degree())
-            assert f24 in K24
+        assert extdeg == 3
+        K24 = Kf
         power = 24
     # Transform polynomial roots x => x**power => cubic(x**power)
     pol = wpoly.monic()
-    if power > 1:
-        t0 = cputime()
-        pol = _fast_adams_operator(pol, power)
-        if Kf.degree() > K24.degree():
-            verbose(
-                f"adams_operator x^{power} reduced field degree {Kf.degree()} => {K24.degree()}",
-                t=t0,
-            )
-            pol = pol.change_ring(K24)
-        else:
-            verbose(f"adams_operator x^{power}", t=t0)
-    if K24 is not Kbase:
+    if K24.degree() == Kf.degree() and K24 is not Kbase:
+        # Adams operator will not give any gain
+        # Apply the whole projection
         x = polygen(K24)
         t0 = cputime()
-        # Apply function (x-16)^3/x
-        pol = ((x - 16) ** 3 * x.inverse_mod(pol)).minpoly_mod(pol)
+        pol = ((x**24 - 16) ** 3 * (x**24).inverse_mod(pol)).minpoly_mod(pol)
         verbose(
-            f"minpoly_mod reduced field degree {K24.degree()} => {Kbase.degree()}", t=t0
+            f"minpoly_mod reduced field degree {Kf.degree()} => {Kbase.degree()}", t=t0
         )
+    elif power > 1:
+        assert K24 is Kbase and f**24 in Kbase
+        # We can reduce the degree in several steps.
+        t0 = cputime()
+        pol = _fast_adams_operator(pol, power)
+        verbose(
+            f"adams_operator x^{power} reduced field degree {Kf.degree()} => {Kbase.degree()}",
+            t=t0,
+        )
+    else:
+        assert power == 1 and Kf == Kbase
     pol = pol.change_ring(Kbase)
     x = wpoly.parent().gen()
     for ff, mult in _fast_pari_roots(pol):
