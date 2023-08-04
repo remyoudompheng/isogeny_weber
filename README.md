@@ -95,28 +95,31 @@ Bostan, Salvy, Morain, Schost, Fast algorithms for computing isogenies between e
 The Weber modular polynomials are known to use much less
 space than classical modular polynomials (about 1728x less space).
 
+An additional symmetry (related to Schläfli modular equation)
+is used to eliminate half of these coefficients, and a large
+number of trailing zero bits.
+
 An ad-hoc binary encoding is used to store Weber modular
 polynomials in a space-efficient way. The resulting files
-are smaller than gzipped files available at
+are 40% the size of original gzipped files available at
 https://math.mit.edu/~drew/WeberModPolys.html
 and standard compression algorithms will not reduce their size
 further.
 
-This is achieved by storing coefficients in binary format
-and trimming trailing zero bits. The polynomial database
-for `l < 512` uses 3.6MB of disk or memory, compared to
-27MB for the SageMath `database_kohel` package
+The polynomial database for `l < 512` uses 2.7MB of disk or memory,
+compared to 27MB for the SageMath `database_kohel` package
 (classical modular polynomials for `l <= 113`, bzip2 compressed)
-or `40MB` for the PARI seadata database (Atkins modular polynomials
+or `40MB` for the PARI seadata database (Atkin modular polynomials
 for `l < 500`, uncompressed).
-
-The precomputed degrees up to 1000 use 73MB of disk/memory
-(original file size 91MB) and degrees between 1000 and 2048
-would use 1188MB (original file size 1439MB).
 
 The source code contains an inlined copy of the database for
 `l <= 127` allowing basic usage without generating a database
 file.
+
+|| Levels || Original file size (GZIP) || Encoded size ||
+| 5-997 | 91 MiB | 36 MiB |
+| 1009-2039 | 1439 MiB | 574 MiB |
+| 4999 | 366 MiB | 149 MiB |
 
 # Performance
 

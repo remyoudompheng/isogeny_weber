@@ -1,6 +1,9 @@
 """
 Test database by checking the existence of isogenies for j-invariants
 linked by the modular polynomials.
+
+This is equivalent to finding coordinates of points
+of modular curves modulo random primes.
 """
 
 import argparse
@@ -18,6 +21,7 @@ from isogeny_weber import Database, isogenies_prime_degree_weber
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
     argp.add_argument("-v", action="store_true")
+    argp.add_argument("--fast", action="store_true")
     argp.add_argument("PBITS", type=int, help="modulus size")
     argp.add_argument("DATABASE", nargs="?", help="Path to Weber polynomial database")
     args = argp.parse_args()
@@ -38,7 +42,7 @@ if __name__ == "__main__":
             K = GF(p)
             print(p, end=" ")
             count = 0
-            while count < 10:
+            while count < (1 if args.fast else 10):
                 j = 0
                 while j == 0 or j == 1728:
                     j = K.random_element()

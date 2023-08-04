@@ -8,39 +8,27 @@ as the file size.
 
 import struct
 
-from .poldb128 import DB128
+from .poldb160 import DB160
 
 
 def _parse_header(s, off):
     hdr = int.from_bytes(s[off : off + 4], "big")
     large = hdr >> 31
     hdrsize = 3 + large
-    if hdr == 0xFFFFFFFF:
-        # Very large coefficient
-        hdrsize = 13
-        dx, dy, sgn, alen, tz = struct.unpack(">HHBHH", s[off + 4 : off + 13])
-    elif large:
+    if large:
         # Large coefficient
-        dx = (hdr >> 21) & 0x3FF
-        dy = (hdr >> 11) & 0x3FF
-        tz = (hdr >> 10) & 1
-        sgn = (hdr >> 9) & 1
-        alen = hdr & 0x1FF
-        if tz:
-            tz = s[off + hdrsize]
-            hdrsize += 1
+        dx = (hdr >> 24) & 0x7F
+        dy = (hdr >> 11) & 0x7FF
+        sgn = (hdr >> 10) & 1
+        alen = hdr & 0x3FF
     else:
         # Small coefficient
         hdr >>= 8
-        dx = (hdr >> 15) & 0xFF
-        dy = (hdr >> 7) & 0xFF
-        tz = (hdr >> 6) & 1
-        sgn = (hdr >> 5) & 1
-        alen = hdr & 31
-        if tz:
-            tz = s[off + hdrsize]
-            hdrsize += 1
-    return hdrsize, dx, dy, tz, sgn, alen
+        dx = (hdr >> 18) & 31
+        dy = (hdr >> 8) & 0x3FF
+        sgn = (hdr >> 7) & 1
+        alen = hdr & 0x7F
+    return hdrsize, dx, dy, sgn, alen
 
 
 class Database:
@@ -53,20 +41,21 @@ class Database:
             with open(filename, "rb") as f:
                 db = f.read()
         else:
-            db = DB128
+            db = DB160
         off = 0
         offs = {}
-        l = None
         while off < len(db):
-            hdrsize, dx, dy, tz, sgn, alen = _parse_header(db, off)
-            # Each polynomial starts with a leading coefficient X^(l+1)
-            # and ends with a coefficient [1,1]
-            if dy == 0:
-                l = dx - 1
-                offs[l] = (off, None)
-            if dx == 1 and dy == 1:
-                offs[l] = (offs[l][0], off + hdrsize + alen)
-            off += hdrsize + alen
+            # polynomial header
+            l = int.from_bytes(db[off : off + 2], "big")
+            ncoef = int.from_bytes(db[off + 2 : off + 5], "big")
+            poly_start = off
+            off += 5
+            # coefficients
+            for _ in range(ncoef):
+                hdrsize, dx, dy, _, alen = _parse_header(db, off)
+                assert dy <= l + 1
+                off += hdrsize + alen
+            offs[l] = (poly_start, off)
 
         self._db = db
         self._offs = offs
@@ -80,19 +69,57 @@ class Database:
         except ImportError:
             pass
 
-    def _coeffs(self, l):
+    def _rawcoeffs(self, l):
+        """
+        Iterator over raw encoded values
+        """
         if l not in self._offs:
             raise ValueError(f"No polynomial for level {l}")
         off, off_end = self._offs[l]
         db = memoryview(self._db)
+        _l = int.from_bytes(db[off : off + 2], "big")
+        _ncoef = int.from_bytes(db[off + 2 : off + 5], "big")
+        assert _l == l
+        count = 0
+        off += 5
         while off < off_end:
-            hdrsize, dx, dy, tz, sgn, alen = _parse_header(db, off)
+            hdrsize, kdx, dy, sgn, alen = _parse_header(db, off)
             off += hdrsize
             a = int.from_bytes(db[off : off + alen], "big")
-            if tz:
-                a <<= 8 * tz
             off += alen
-            yield dx, dy, -a if sgn else a
+            yield kdx, dy, -a if sgn else a
+            count += 1
+        assert count == _ncoef
+
+    def _coeffs(self, l):
+        """
+        Expand encoded data to full polynomial integer coefficients
+        """
+        from sage.all import legendre_symbol, gcd
+
+        yield l, l, -1
+        yield l + 1, 0, 1
+        yield 0, l + 1, 1
+        sign = legendre_symbol(2, l)
+        s = gcd(12, (l - 1) // 2)
+        # Bottom coefficient
+        b = (l - 1) // (2 * s)
+        yield 1, 1, -(sign ** (b % 2)) << (b * s)
+        for kdx, dy, a in self._rawcoeffs(l):
+            a = a * l
+            dx = l + 1 - (l * dy) % 24 - 24 * kdx
+            assert (l + 1) // 2 <= dx and dx >= dy
+            yield dx, dy, a
+            # Symmetries
+            if dx > dy:
+                yield dy, dx, a
+            if dx + dy > l + 1:
+                lowdx, lowdy = l + 1 - dx, l + 1 - dy
+                b = (dx + dy - l - 1) // (2 * s)
+                mult = (sign ** (b % 2)) << (b * s)
+                yield lowdx, lowdy, mult * a
+                if lowdx != lowdy:
+                    yield lowdy, lowdx, mult * a
 
     def __getitem__(self, l):
         """
@@ -105,7 +132,6 @@ class Database:
         poly = {}
         for dx, dy, a in self._coeffs(l):
             poly[(dx, dy)] = a
-            poly[(dy, dx)] = a
         return Zxy(poly)
 
     def keys(self):
@@ -127,7 +153,6 @@ class Database:
             for dx, dy, a in self._coeffs(l):
                 ra = R(a)
                 poly[(dx, dy)] = ra
-                poly[(dy, dx)] = ra
             return Rxy(poly)
         else:
             # Univariate
@@ -136,6 +161,4 @@ class Database:
             powers = R(y).powers(l + 2)
             for dx, dy, a in self._coeffs(l):
                 coeffs[dx] += a * powers[dy]
-                if dx != dy:
-                    coeffs[dy] += a * powers[dx]
             return Rx(coeffs)
