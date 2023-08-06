@@ -19,6 +19,7 @@ def main():
 
     # FIXME: spurious is_prime in Polynomial.factor
     proof.arithmetic(False)
+    pari.allocatemem(4 << 30)
 
     set_verbose(1)
     weber_db = Database(args.db)

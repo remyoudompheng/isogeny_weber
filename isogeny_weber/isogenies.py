@@ -8,21 +8,22 @@ import itertools
 import math
 
 from sage.all import (
-    ZZ,
-    GF,
-    EllipticCurve,
-    polygen,
-    cputime,
-    pari,
-    mod,
-    euler_phi,
-    Zmod,
+    BinaryQF,
     CRT,
     CRT_basis,
-    prod,
+    EllipticCurve,
+    GF,
+    ZZ,
+    Zmod,
+    cputime,
+    euler_phi,
     factor,
+    legendre_symbol,
+    mod,
+    pari,
+    polygen,
+    prod,
     two_squares,
-    BinaryQF,
 )
 
 from sage.misc.verbose import verbose
@@ -352,7 +353,12 @@ def _fast_elkies(E1, E2, l):
 #
 # René Schoof, Counting points on elliptic curves over finite fields
 # http://www.numdam.org/item/JTNB_1995__7_1_219_0.pdf
-
+#
+# Pierrick Gaudry, François Morain.
+# Fast algorithms for computing the eigenvalue in the Schoof-Elkies-Atkin algorithm.
+# ISSAC '06: Proceedings of the 2006 international symposium on symbolic and algebraic computation
+# Jul 2006, Genoa, Italy, pp.109 - 115, ⟨10.1145/1145768.1145791⟩. ⟨inria-00001009⟩
+# https://hal.science/inria-00001009
 
 def trace_of_frobenius(E, weber_db=Database()):
     """
@@ -472,6 +478,7 @@ def trace_of_frobenius(E, weber_db=Database()):
         wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
         t0 = cputime()
         roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
+        verbose(f"{len(roots)} roots for modular equation at level {l}", t=t0, level=2)
         if any(j == K(1728) for _, j in roots):
             verbose(f"Curve is {l}-isogenous to j=1728")
             return trace_j1728()
@@ -487,13 +494,14 @@ def trace_of_frobenius(E, weber_db=Database()):
         elif len(roots) == 0:
             # Compute order of Frobenius
             # We are only interested in values of r giving few traces
-            # at most 32 and at most sqrt(l)
-            maxr = max(
-                d
-                for d in ZZ(l + 1).divisors()
-                if euler_phi(d) <= min(32, ZZ(l).isqrt())
-            )
-            r = _order_of_frobenius(wdescent, wfrob, limit=maxr)
+            # at most 32 and at most 2 sqrt(l)
+            # Parity of (l+1)/r is related to (p|l) (Schoof, Proposition 6.3)
+            parity_s = 0 if legendre_symbol(p, l) == 1 else 1
+            rs = [d for d in ZZ(l + 1).divisors() if ((l + 1) // d) % 2 == parity_s]
+            good_rs = [_r for _r in rs if euler_phi(_r) <= min(32, 2 * ZZ(l).isqrt())]
+            r = None
+            if good_rs:
+                r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs)) 
             if r is not None:
                 ts = atkin_traces(p, l, r)
                 if len(ts) == 1:
@@ -518,8 +526,6 @@ def trace_of_frobenius(E, weber_db=Database()):
             crt_mods.append(l)
             crt_vals.append(ZZ(tr))
             verbose(f"processed Elkies prime {l} (trace={tr}, double root)", t=t0)
-        if prod(crt_mods) * atkin_gain > target:
-            break
         # Recompute best atkins
         sort_atkins = sorted(
             atkin_choices,
@@ -542,6 +548,9 @@ def trace_of_frobenius(E, weber_db=Database()):
             candidates = target // atkin_gain // prod(crt_mods) + 1
             if candidates >> 100 == 0:
                 verbose(f"~{candidates} remaining candidates")
+        # Exit if done
+        if prod(crt_mods) * atkin_gain > target:
+            break
     prod_e = prod(crt_mods)
     verbose(f"Product of Elkies primes {prod_e} ({prod_e.bit_length()} bits)")
     verbose(
@@ -594,6 +603,7 @@ def _order_of_frobenius(modulus, frob, limit=None):
     x = modulus.parent().gen()
     if frob == x:
         return 1
+    t0 = cputime()
     ops = 0
     if limit <= 5:
         fn, exp = frob, 1
@@ -604,7 +614,9 @@ def _order_of_frobenius(modulus, frob, limit=None):
                 break
         if fn == x:
             verbose(
-                f"Found Frobenius order={exp} using {ops} mod compositions", level=2
+                f"Found Frobenius order={exp} using {ops} mod compositions",
+                t=t0,
+                level=2,
             )
             return exp
     else:
@@ -617,6 +629,7 @@ def _order_of_frobenius(modulus, frob, limit=None):
             if bs[-1] == x:
                 verbose(
                     f"Found Frobenius order={len(bs)-1} using {ops} mod compositions",
+                    t=t0,
                     level=2,
                 )
                 return len(bs) - 1
@@ -629,6 +642,7 @@ def _order_of_frobenius(modulus, frob, limit=None):
                 j = bs.index(frobt)
                 verbose(
                     f"Found Frobenius order={t*exp-j} using {ops} mod compositions",
+                    t=t0,
                     level=2,
                 )
                 return t * exp - j
@@ -637,11 +651,15 @@ def _order_of_frobenius(modulus, frob, limit=None):
         if frobt in bs:
             j = bs.index(frobt)
             verbose(
-                f"Found Frobenius order={t*exp-j} using {ops} mod compositions", level=2
+                f"Found Frobenius order={t*exp-j} using {ops} mod compositions",
+                t=t0,
+                level=2,
             )
             return t * exp - j
     verbose(
-        f"Frobenius order not found ({limit=}), used {ops} mod compositions", level=2
+        f"Frobenius order not found ({limit=}), used {ops} mod compositions",
+        t=t0,
+        level=2,
     )
     return None
 
@@ -789,66 +807,32 @@ def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
         # Y^p is either Y or -Y
         eigen = 1 if y_pm1[0] == 1 else -1
         assert y_pm1 == Kx(eigen)
-        verbose(f"skipped discrete log, eigenvalue is {eigen}", t=t0, level=1)
+        verbose(f"skipped discrete log, eigenvalue is {eigen}", t=t0, level=2)
         return eigen * (1 + mod(p, l))
 
-    # Too lazy to implement point addition.
-    # Instead we compute a discrete log in Aut(Z/lZ) = (Z/lZ)*
-    # Solve eigenvalue, this is a discrete log in (Z/lZ)x
-    # It will cost O(sqrt(l)) modular compositions of degree l
-    # Look for g^ak = Frob g^b
-    g = int(Zmod(l).multiplicative_generator())
-    # g is hopefully very small, g <= 11 for l < 1000 except in 7 cases
-    if g not in scalar_muls:
-        scalar_muls[g] = E.multiplication_by_m(g)
-    # Beware they are multivariates.
-    gx, gy = scalar_muls[g]
-    gx = Kx(gx.numerator()) * Kx(gx.denominator()).inverse_mod(ker)
-    gx %= ker
-    gy = Kx(gy.numerator().coefficient([None, 1])) * Kx(gy.denominator()).inverse_mod(
-        ker
-    )
-    gy %= ker
-    autg = _modular_automorphism(ker, gx)
-
-    bs = [x, gx]
-    step = ZZ(l).isqrt() + 1
-    while len(bs) < step:
-        bs.append(autg(bs[-1]))
-    autg_giant = _modular_automorphism(ker, autg(bs[-1]))
-
-    frobi = frob
-    i = 0
-    while frobi not in bs and i < l:
-        frobi = autg_giant(frobi)
-        i += 1
-    j = bs.index(frobi)
-
-    # Now Frobenius * g**(step*i) == ±g**j
-    eigen = pow(g, j - step * i, l)
-    verbose(f"solved discrete log, eigenvalue is ±{eigen}", t=t0, level=2)
-
-    eigen = mod(eigen, l)
-    dlog = eigen.log(g)
-    dlog2 = (-eigen).log(g)
-    if dlog >= dlog2:
-        eigen, dlog = -eigen, dlog2
-
-    # (x[k],y[k]) = g^k (x,y) = (autg(x[k-1]), gy(x[k-1]) * y[k-1])
-    # so y[k] / y[k-1] = gy(x[k-1])
-    # y[k] = gy(x[k-1]) * gy(x[k-2]) * ... * gy(x)
-    #      = gy * autg(gy) * ... * autg^(k-1)(gy)
-    yk = gy
-    ggy = gy
-    for _ in range(dlog - 1):
-        ggy = autg(ggy)
-        yk = (yk * ggy) % ker
-    if yk != y_pm1:
-        assert yk == -y_pm1
-        eigen = -eigen
-    tr = eigen + mod(p, l) / eigen
-    verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
-    return tr
+    # There must exist small integers P and Q (less than sqrt(l))
+    # such that: P*(x,y) = ±Q*Frob(x,y)
+    bound = ZZ(l).isqrt() + 1
+    Mul1 = EllMultiples(ker, bound, A, B, x)
+    MulF = EllMultiples(ker, bound, A, B, frob)
+    x1s = [Mul1.x(i) for i in range(1, bound + 1)]
+    eigen = None
+    for i in range(1, bound + 1):
+        xFi = MulF.x(i)
+        if xFi in x1s:
+            # i * Frob(x) = j * x
+            j = x1s.index(xFi) + 1
+            eigen = mod(j, l) / mod(i, l)
+            yFi = MulF.y(i, y_pm1)
+            y1j = Mul1.y(j, 1)
+            if yFi == -y1j:
+                eigen = -eigen
+            else:
+                assert yFi == y1j
+            tr = eigen + mod(p, l) / eigen
+            verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
+            return tr
+    raise ValueError("impossible")
 
 
 def _modular_automorphism(modulus, xp):
@@ -885,3 +869,99 @@ def _modular_automorphism(modulus, xp):
         return res
 
     return f
+
+
+class EllMultiples:
+    """
+    Compute multiples of a given base point, using only x-coordinate
+    when possible.
+
+    Reference: https://en.wikipedia.org/wiki/Division_polynomials
+
+    This is the same as division_polynomial_0 in K[x]/modulus,
+    with extra caching to save some multiplications.
+
+    Computing N multiples requires:
+    * 3N multiplications in psi2 and psi_pm
+    * 2.5N multiplications in psi
+    * M+I (modular quotient) to emit a x coordinate
+    """
+
+    def __init__(self, modulus, m, A, B, x):
+        self._x0 = x
+        R = modulus.parent()
+        self._A, self._B = A, B
+        self._4y2 = 4 * (x**3 + A * x + B)
+        self._4y2inv = self._4y2.inverse_mod(modulus)
+        self._dP = 3 * x**2 + A
+        self._ring = R
+        self._modulus = modulus
+        # Tn(x0) where Tn is the n-th division polynomial if n is odd
+        # Tn(x0,y)/2y is n is even
+        self._psi = [R(0), R(1), R(1)] + [None for _ in range(m)]
+        # The square of _psi
+        self._psi2 = [None for _ in range(m + 3)]
+        # The product psi_pm[i] = psi[i-1] * psi[i+1]
+        self._psi_pm = [None for _ in range(m + 3)]
+        # We allocate until n+1 because y(n) needs psi(n+2)
+
+    def x(self, n):
+        # x - [n-1][n+1]/[n]^2
+        return (
+            self._x0 - self.psi_pm(n) * self.psi2(n).inverse_mod(self._modulus)
+        ) % self._modulus
+
+    def y(self, n, y0):
+        # Compute the y-coordinate of nP, given the y-coordinate of P.
+        # [2n] / 2[n]^4
+        if n == 1:
+            return y0
+        # return psi(2n)/psi2(n)^2*y
+        res = self.psi_pm(n + 1) * self.psi2(n - 1)
+        res -= self.psi_pm(n - 1) * self.psi2(n + 1)
+        res *= self._4y2inv
+        mod = self._modulus
+        res = res * pow(self.psi2(n).inverse_mod(mod), 2, mod)
+        return (res * y0) % mod
+
+    def psi(self, i):
+        if self._psi[i] is None:
+            if i == 3:
+                res = (
+                    3 * self._x0**4
+                    + (6 * self._A) * self._x0**2
+                    + (12 * self._B) * self._x0
+                    - self._A**2
+                )
+            elif i == 4:
+                res = 2 * self._dP * self.psi(3) - self._4y2**2
+            elif i % 2 == 1:
+                # [2m+1] = [m+2][m]^3 - [m-1][m+1]^3
+                m = i // 2
+                res = self.psi_pm(m + 1) * self.psi2(m)
+                res -= self.psi_pm(m) * self.psi2(m + 1)
+            else:
+                # [2m]/2y = [m]/4y^2 ([m+2][m-1]^2 - [m-2][m+1]^2)
+                m = i // 2
+                res = self.psi_pm(m + 1) * self.psi2(m - 1)
+                res -= self.psi_pm(m - 1) * self.psi2(m + 1)
+                res *= self._4y2inv
+            self._psi[i] = res % self._modulus
+        return self._psi[i]
+
+    def psi2(self, i):
+        if self._psi2[i] is None:
+            if i % 2 == 0:
+                # Restore the 4y² factor
+                self._psi2[i] = (self.psi(i) ** 2 * self._4y2) % self._modulus
+            else:
+                self._psi2[i] = self.psi(i) ** 2 % self._modulus
+        return self._psi2[i]
+
+    def psi_pm(self, i):
+        if self._psi_pm[i] is None:
+            self._psi_pm[i] = (self.psi(i - 1) * self.psi(i + 1)) % self._modulus
+            if i % 2 == 1:
+                # i-1 and i+1 are even, restore the 4y² factor
+                self._psi_pm[i] = (self._psi_pm[i] * self._4y2) % self._modulus
+        return self._psi_pm[i]
