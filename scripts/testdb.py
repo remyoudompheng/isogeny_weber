@@ -36,7 +36,7 @@ if __name__ == "__main__":
         points = 0
         for _ in range(3):
             # Test 3 primes and 10 values per prime
-            p = random_prime(2**args.PBITS, lbound=2**(args.PBITS-1))
+            p = random_prime(2**args.PBITS, lbound=2 ** (args.PBITS - 1))
             if p <= 4 * l:
                 continue
             K = GF(p)

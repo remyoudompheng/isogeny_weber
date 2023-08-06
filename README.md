@@ -138,3 +138,9 @@ If the base field is a prime field, computations usually take
 at most a few seconds even for `l=997`. It may take a couple of minutes
 when working over an extension field depending on CPU performance.
 
+## Application to point counting
+
+As an application, a toy implementation of the SEA algorithm
+for point counting is provided. It can handle (very slowly) prime moduli
+up to approximately 1.4L bits if modular polynomial up to level L
+are provided.
