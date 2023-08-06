@@ -9,13 +9,13 @@ import math
 
 from sage.all import (
     ZZ,
-    RR,
     GF,
     EllipticCurve,
     polygen,
     cputime,
     pari,
     mod,
+    euler_phi,
     Zmod,
     CRT,
     CRT_basis,
@@ -218,27 +218,24 @@ def _weber_poly_roots(wpoly, Kbase, f, j):
             yield f2, j2, mult
 
 
-def _weber_poly_roots_factors(wpoly, Kbase, f):
+def _weber_poly_roots_frobenius(wpoly, Kbase, f):
     """
     Compute roots of the Weber modular polynomial Wl(f, x)
-    assumed squarefree, but also the degree of remaining factors.
+    assumed squarefree, and the Frobenius endomorphism
+    modulo the base field polynomial obtained by descent.
     """
     pol, map_ = _weber_poly_descent(wpoly, Kbase, f, force=True)
     # We require analysis over the base field
     assert pol.base_ring().order() == Kbase.order()
-    by_degree = pol._pari_with_name().factormodDDF()
-    roots = []
-    r = None
-    for i in range(by_degree.nrows()):
-        fac = by_degree[i, 0]
-        deg = by_degree[i, 1]
-        if deg == 1:
-            roots = fac.polrootsmod()
-        else:
-            if r is not None:
-                ValueError("conflicting modular polynomial factor size {r} vs {deg}")
-            r = deg
-    return [(f, j) for rt in roots for f, j in map_(rt)], r
+    # We don't compute a full distinct-degree decomposition.
+    # Instead, compute the Frobenius polynomial and use it
+    # to find small degree factors.
+    Kx, x = pol.parent().objgen()
+    p = Kbase.order()
+    pol_pari = pol._pari_with_name()
+    frob_pari = (pari.Mod(x._pari_with_name(), pol_pari) ** p).lift()
+    roots = pari.gcd(frob_pari - x._pari_with_name(), pol_pari).polrootsmod()
+    return [(f, j) for rt in roots for f, j in map_(rt)], pol, Kx(frob_pari.lift())
 
 
 def _fast_adams_operator(p, k):
@@ -474,7 +471,7 @@ def trace_of_frobenius(E, weber_db=Database()):
     for l in ls:
         wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
         t0 = cputime()
-        roots, r = _weber_poly_roots_factors(wp, K, f)
+        roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
         if any(j == K(1728) for _, j in roots):
             verbose(f"Curve is {l}-isogenous to j=1728")
             return trace_j1728()
@@ -482,29 +479,45 @@ def trace_of_frobenius(E, weber_db=Database()):
             verbose(f"Curve is {l}-isogenous to j=0")
             return trace_j0()
         if len(roots) == 2:
-            verbose(f"Elkies prime {l}", t=t0)
-            tr = elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls=scalar_muls)
+            r = None
+            tr = elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls=scalar_muls)
             crt_mods.append(l)
             crt_vals.append(ZZ(tr))
+            verbose(f"processed Elkies prime {l} (trace={tr})", t=t0)
         elif len(roots) == 0:
-            verbose(f"Atkin prime {l}", t=t0)
-            ts = atkin_traces(p, l, r)
-            if len(ts) == 1:
-                verbose(f"factor degree {r} => trace={list(ts)[0]}")
-                crt_mods.append(l)
-                crt_vals.append(ts.pop())
+            # Compute order of Frobenius
+            # We are only interested in values of r giving few traces
+            # at most 32 and at most sqrt(l)
+            maxr = max(
+                d
+                for d in ZZ(l + 1).divisors()
+                if euler_phi(d) <= min(32, ZZ(l).isqrt())
+            )
+            r = _order_of_frobenius(wdescent, wfrob, limit=maxr)
+            if r is not None:
+                ts = atkin_traces(p, l, r)
+                if len(ts) == 1:
+                    verbose(f"factor degree {r} => trace={list(ts)[0]}", level=2)
+                    crt_mods.append(l)
+                    crt_vals.append(ts.pop())
+                else:
+                    verbose(f"factor degree {r} => {len(ts)} traces", level=2)
+                    atkin_choices[l] = ts
+                verbose(f"processed Atkin prime {l} ({len(ts)} traces)", t=t0)
             else:
-                verbose(f"factor degree {r} => {len(ts)} traces")
-                atkin_choices[l] = ts
+                verbose(f"processed Atkin prime {l} (too many traces)", t=t0)
         elif len(roots) in (1, l + 1):
             if len(roots) == l + 1:
-                verbose(f"Volcano inner node: t^2 - 4p is divisible by {l}^2", t=t0)
+                verbose(
+                    f"Volcano inner node: t^2 - 4p is divisible by {l}^2", t=t0, level=2
+                )
             else:
-                verbose(f"Double root: t^2 - 4p is divisible by {l}", t=t0)
+                verbose(f"Double root: t^2 - 4p is divisible by {l}", t=t0, level=2)
                 r = 1
-            tr = elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls)
+            tr = elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls)
             crt_mods.append(l)
             crt_vals.append(ZZ(tr))
+            verbose(f"processed Elkies prime {l} (trace={tr}, double root)", t=t0)
         if prod(crt_mods) * atkin_gain > target:
             break
         # Recompute best atkins
@@ -524,12 +537,11 @@ def trace_of_frobenius(E, weber_db=Database()):
         if crt_mods[-1] == l and len(crt_mods) % 5 == 0:
             verbose(f"Progress: {prod(crt_mods).bit_length()} known bits", t=t_start)
             verbose(
-                f"Progress: {atkin_gain.bit_length()} theoretical bits from Atkin primes {best_atkins} (2^{atkin_cost.bit_length()} brute force)"
+                f"Progress: {atkin_gain.bit_length()} additional bits from Atkin primes {best_atkins} (2^{atkin_cost.bit_length()} brute force)"
             )
             candidates = target // atkin_gain // prod(crt_mods) + 1
-            if candidates >> 100:
-                candidates = RR(candidates)
-            verbose(f"~{candidates} remaining candidates")
+            if candidates >> 100 == 0:
+                verbose(f"~{candidates} remaining candidates")
     prod_e = prod(crt_mods)
     verbose(f"Product of Elkies primes {prod_e} ({prod_e.bit_length()} bits)")
     verbose(
@@ -569,6 +581,69 @@ def trace_of_frobenius(E, weber_db=Database()):
     E.set_order(p + 1 - tr, check=True, num_checks=checks)
     verbose(f"Order of E checked using {checks} random points")
     return tr
+
+
+def _order_of_frobenius(modulus, frob, limit=None):
+    """
+    Compute order of Frobenius endomorphism for a polynomial
+    having factors of equal degree (very common in isogenies).
+    """
+    if limit is None:
+        limit = modulus.degree()
+    f = _modular_automorphism(modulus, frob)
+    x = modulus.parent().gen()
+    if frob == x:
+        return 1
+    ops = 0
+    if limit <= 5:
+        fn, exp = frob, 1
+        while fn != x:
+            fn, exp = f(fn), exp + 1
+            ops += 1
+            if exp >= limit:
+                break
+        if fn == x:
+            verbose(
+                f"Found Frobenius order={exp} using {ops} mod compositions", level=2
+            )
+            return exp
+    else:
+        # BSGS method
+        t = ZZ(limit.isqrt() + 1)
+        bs = [x, frob]
+        while len(bs) < t:
+            bs.append(f(bs[-1]))
+            ops += 1
+            if bs[-1] == x:
+                verbose(
+                    f"Found Frobenius order={len(bs)-1} using {ops} mod compositions",
+                    level=2,
+                )
+                return len(bs) - 1
+        # frobt = Frob^(t*exp)
+        frobt, exp = f(bs[-1]), 1
+        ft = _modular_automorphism(modulus, frobt)
+        ops += 1
+        for _ in range(limit // t):
+            if frobt in bs:
+                j = bs.index(frobt)
+                verbose(
+                    f"Found Frobenius order={t*exp-j} using {ops} mod compositions",
+                    level=2,
+                )
+                return t * exp - j
+            frobt, exp = ft(frobt), exp + 1
+            ops += 1
+        if frobt in bs:
+            j = bs.index(frobt)
+            verbose(
+                f"Found Frobenius order={t*exp-j} using {ops} mod compositions", level=2
+            )
+            return t * exp - j
+    verbose(
+        f"Frobenius order not found ({limit=}), used {ops} mod compositions", level=2
+    )
+    return None
 
 
 def atkin_traces(p, l, r):
@@ -660,23 +735,16 @@ def match_atkin(bound, crtmod, crtval, atk_primes, atk_traces: dict):
     return res
 
 
-def elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls: dict):
+def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
     """
     Compute Frobenius trace on isogeny kernel
 
     l: degree of isogeny
     f: f-invariant of E
-    r: order of Frobenius
     wp: Weber modular polynomial specialized for f
     roots: roots of wp(f,x)
     weber_db: database of modular polynomials
     """
-    if r == 2:
-        # Frobenius acts by conjugation
-        # Eigenvalues are ±sqrt(p)
-        verbose(f"Trivial trace 0", level=1)
-        return 0
-
     A, B, j = E.a4(), E.a6(), E.j_invariant()
     K, Kext = E.base_ring(), f.parent()
 
@@ -705,7 +773,6 @@ def elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls: dict):
     # Use PARI to get Frobenius
     frob_pari = pari.Mod(x._pari_with_name(), ker._pari_with_name()) ** p
     frob = Kx(frob_pari.lift())
-    verbose(f"computed frobenius on kernel", t=t0, level=2)
 
     # Confirm sign using y.
     # Y ^ (p-1) = (X^3 + A X + B)^(p-1)/2
@@ -714,6 +781,8 @@ def elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls: dict):
     ) ** ((p - 1) // 2)
     y_pm1 = Kx(y_pm1_pari.lift())
     # Frob(X,Y) = (X^p, Y^(p-1) Y)
+
+    verbose(f"computed frobenius on kernel", t=t0, level=2)
 
     if frob == x:
         # Eigenvalue is ±1, the other one is ±p
@@ -742,27 +811,22 @@ def elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls: dict):
     gy %= ker
     autg = _modular_automorphism(ker, gx)
 
-    if r == 1:
-        # Eigenvalue is a square root of p, no need to do a group discrete log.
-        eigen = mod(p, l).sqrt()
-        verbose(f"skipped discrete log, eigenvalue is ±{eigen}", t=t0, level=2)
-    else:
-        bs = [x, gx]
-        step = ZZ(l).isqrt() + 1
-        while len(bs) < step:
-            bs.append(autg(bs[-1]))
-        autg_giant = _modular_automorphism(ker, autg(bs[-1]))
+    bs = [x, gx]
+    step = ZZ(l).isqrt() + 1
+    while len(bs) < step:
+        bs.append(autg(bs[-1]))
+    autg_giant = _modular_automorphism(ker, autg(bs[-1]))
 
-        frobi = frob
-        i = 0
-        while frobi not in bs and i < l:
-            frobi = autg_giant(frobi)
-            i += 1
-        j = bs.index(frobi)
+    frobi = frob
+    i = 0
+    while frobi not in bs and i < l:
+        frobi = autg_giant(frobi)
+        i += 1
+    j = bs.index(frobi)
 
-        # Now Frobenius * g**(step*i) == ±g**j
-        eigen = pow(g, j - step * i, l)
-        verbose(f"solved discrete log, eigenvalue is ±{eigen}", t=t0, level=2)
+    # Now Frobenius * g**(step*i) == ±g**j
+    eigen = pow(g, j - step * i, l)
+    verbose(f"solved discrete log, eigenvalue is ±{eigen}", t=t0, level=2)
 
     eigen = mod(eigen, l)
     dlog = eigen.log(g)
@@ -783,7 +847,7 @@ def elkies_trace(E, l, f, r, wp, roots, weber_db, scalar_muls: dict):
         assert yk == -y_pm1
         eigen = -eigen
     tr = eigen + mod(p, l) / eigen
-    verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=1)
+    verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
     return tr
 
 
