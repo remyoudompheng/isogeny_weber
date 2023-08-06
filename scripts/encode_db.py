@@ -19,7 +19,7 @@ Coefficients satisfy:
 - [l,l] = -1
 - all middle coefficients (total degree 2..2l-1 and each degree <= l)
   are such that:
-  - they are multiples of l
+  - they are multiples of l (Kronecker congruence)
   - total degree d = (l+1) ± 2bs and degree=[d/2±ar,d/2∓ar]
     where r = gcd(12, (l+1)/2) and s = gcd(12, (l-1)/2)
   - if degree is [dx,dy] then

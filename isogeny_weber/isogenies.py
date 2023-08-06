@@ -154,8 +154,10 @@ def _weber_poly_roots(wpoly, Kbase, f, j):
 
 def _fast_adams_operator(p, k):
     """
-    Apply transformation x -> x^k to roots of polynomial
+    Apply transformation x -> x^k (Graeffe transform) to roots of polynomial
     This is equivalent to p.adams_operator(k), but faster.
+
+    The complexity is quasi-linear w.r.t. degree of p.
 
     See https://doi.org/10.1016/j.jsc.2005.07.001
     Bostan, Flajolet, Salvy, Schost, Fast computation of special resultants
@@ -169,11 +171,18 @@ def _fast_adams_operator(p, k):
     newton = p.derivative().reverse() * p.reverse().inverse_series_trunc(k * d + 1)
     # Extract Newton sums where exponent is a multiple of k
     # Reconstruct polynomial using exp(integral dP/P) = P
-    f = R([newton[k * i] for i in range(1, d + 1)])
-    result = (-f).integral().add_bigoh(d + 1).exp(prec=d + 1)
-    result = R(result).reverse()
-    if _DEBUG:
-        assert result == (R.gen() ** k).minpoly_mod(p)
+    f = R([-newton[k * i] for i in range(1, d + 1)])
+    # result = f.integral().add_bigoh(d + 1).exp(prec=d + 1)
+    # Handmade Newton iteration following section 2.2.1 of BFSS paper
+    res = 1 + f[0] * R.gen()
+    prec = 2
+    while prec <= d:
+        # m_ is very small
+        m_ = f - res.derivative() * res.inverse_series_trunc(2 * prec)
+        m = 1 + m_.truncate(2 * prec).integral()
+        res = (res * m).truncate(2 * prec)
+        prec = 2 * prec
+    result = res.truncate(d + 1).reverse()
     assert result.degree() == d
     return result
 

@@ -16,7 +16,7 @@ https://www.math.auckland.ac.nz/~sgal018/crypto-book/crypto-book.html
 This script is a hobby project and is not meant to be used
 in any serious research or computation.
 
-# Example code
+## Example code
 
 The library only processes elliptic curves defined over finite fields,
 with large enough characteristic (`p > 4*l`). Isogenies involving
@@ -69,7 +69,7 @@ over Finite Field in i of size 1000000000039^2,
  over Finite Field in i of size 1000000000039^2]
 ```
 
-# Additional implementation details
+## Additional implementation details
 
 Since the Weber modular form is not a rational function of
 the j-invariant, it involves working on possibly larger field extensions.
@@ -90,7 +90,7 @@ of Stark's algorithm (`compute_isogeny_kernel_polynomial`)
 Bostan, Salvy, Morain, Schost, Fast algorithms for computing isogenies between elliptic curves
 [arXiv:cs/0609020](https://arxiv.org/pdf/cs/0609020.pdf)
 
-# Database footprint
+## Database footprint
 
 The Weber modular polynomials are known to use much less
 space than classical modular polynomials (about 1728x less space).
@@ -104,29 +104,32 @@ polynomials in a space-efficient way. The resulting files
 are 40% the size of original gzipped files available at
 https://math.mit.edu/~drew/WeberModPolys.html
 and standard compression algorithms will not reduce their size
-further.
+further. Each polynomial will use about l^3/1000 bytes
+(or l^3/900 for large l).
 
-The polynomial database for `l < 512` uses 2.7MB of disk or memory,
+The polynomial database for `l < 512` uses 2.7 MiB of disk or memory,
 compared to 27MB for the SageMath `database_kohel` package
 (classical modular polynomials for `l <= 113`, bzip2 compressed)
-or `40MB` for the PARI seadata database (Atkin modular polynomials
-for `l < 500`, uncompressed).
+or 18.3 MiB for the PARI seadata database (Atkin modular polynomials
+for `l < 500`, gzip compressed).
 
 The source code contains an inlined copy of the database for
 `l <= 127` allowing basic usage without generating a database
 file.
 
-|| Levels || Original file size (GZIP) || Encoded size ||
+| Levels | Original file size (GZIP) | Encoded size |
+| ------ | ------------------------- | ------------ |
 | 5-997 | 91 MiB | 36 MiB |
+| 5-1499 | 467 MiB | 185 MiB |
 | 1009-2039 | 1439 MiB | 574 MiB |
-| 4999 | 366 MiB | 149 MiB |
+| only 4999 | 366 MiB | 149 MiB |
 
-# Performance
+## Performance
 
 This implementation is usually much faster than the generic
 implementation of `isogenies_prime_degree` factoring torsion
 polynomials (but slower than the optimized versions
-used for special values `l <= 31` and `l = 41, 47, 59, 73`).
+used for special values `l <= 31` and `l = 41, 47, 59, 71`).
 
 It behaves roughly super-linearly for parameter `l`
 and roughly linearly in `log q` (the bit size of the base field).
