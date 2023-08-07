@@ -29,6 +29,7 @@ from sage.all import (
 from sage.misc.verbose import verbose
 
 from .poldb import Database
+from .polynomials import frobenius_mod, fast_adams_operator, xp_from_cubicp
 
 
 def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=True):
@@ -168,7 +169,7 @@ def _weber_poly_descent(wpoly, Kbase, f, force=False):
         assert K24 is Kbase and f**24 in Kbase
         # We can reduce the degree in several steps.
         t0 = cputime()
-        pol = _fast_adams_operator(pol, power)
+        pol = fast_adams_operator(pol, power)
         verbose(
             f"adams_operator x^{power} reduced field degree {Kf.degree()} => {Kbase.degree()}",
             t=t0,
@@ -231,47 +232,11 @@ def _weber_poly_roots_frobenius(wpoly, Kbase, f):
     # We don't compute a full distinct-degree decomposition.
     # Instead, compute the Frobenius polynomial and use it
     # to find small degree factors.
-    Kx, x = pol.parent().objgen()
     p = Kbase.order()
-    pol_pari = pol._pari_with_name()
-    frob_pari = (pari.Mod(x._pari_with_name(), pol_pari) ** p).lift()
-    roots = pari.gcd(frob_pari - x._pari_with_name(), pol_pari).polrootsmod()
-    return [(f, j) for rt in roots for f, j in map_(rt)], pol, Kx(frob_pari.lift())
-
-
-def _fast_adams_operator(p, k):
-    """
-    Apply transformation x -> x^k (Graeffe transform) to roots of polynomial
-    This is equivalent to p.adams_operator(k), but faster.
-
-    The complexity is quasi-linear w.r.t. degree of p.
-
-    See https://doi.org/10.1016/j.jsc.2005.07.001
-    Bostan, Flajolet, Salvy, Schost, Fast computation of special resultants
-    """
-    d = p.degree()
-    assert p.is_monic()
-    assert p.base_ring().characteristic() > d
-    assert p[0] != 0
-    R = p.parent()
-    # Build Newton series Sum(sum(root^k) t^k) = dP / P
-    newton = p.derivative().reverse() * p.reverse().inverse_series_trunc(k * d + 1)
-    # Extract Newton sums where exponent is a multiple of k
-    # Reconstruct polynomial using exp(integral dP/P) = P
-    f = R([-newton[k * i] for i in range(1, d + 1)])
-    # result = f.integral().add_bigoh(d + 1).exp(prec=d + 1)
-    # Handmade Newton iteration following section 2.2.1 of BFSS paper
-    res = 1 + f[0] * R.gen()
-    prec = 2
-    while prec <= d:
-        # m_ is very small
-        m_ = f - res.derivative() * res.inverse_series_trunc(2 * prec)
-        m = 1 + m_.truncate(2 * prec).integral()
-        res = (res * m).truncate(2 * prec)
-        prec = 2 * prec
-    result = res.truncate(d + 1).reverse()
-    assert result.degree() == d
-    return result
+    frob = frobenius_mod(pol, p)
+    (x,) = pol.variables()
+    roots = (frob - x).gcd(pol).roots(multiplicities=False)
+    return [(f, j) for rt in roots for f, j in map_(rt)], pol, frob
 
 
 def _fast_pari_roots(poly):
@@ -359,6 +324,7 @@ def _fast_elkies(E1, E2, l):
 # ISSAC '06: Proceedings of the 2006 international symposium on symbolic and algebraic computation
 # Jul 2006, Genoa, Italy, pp.109 - 115, ⟨10.1145/1145768.1145791⟩. ⟨inria-00001009⟩
 # https://hal.science/inria-00001009
+
 
 def trace_of_frobenius(E, weber_db=Database()):
     """
@@ -501,7 +467,7 @@ def trace_of_frobenius(E, weber_db=Database()):
             good_rs = [_r for _r in rs if euler_phi(_r) <= min(32, 2 * ZZ(l).isqrt())]
             r = None
             if good_rs:
-                r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs)) 
+                r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs))
             if r is not None:
                 ts = atkin_traces(p, l, r)
                 if len(ts) == 1:
@@ -788,17 +754,19 @@ def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
 
     Kx, x = ker.parent().objgen()
     p = K.characteristic()
-    # Use PARI to get Frobenius
-    frob_pari = pari.Mod(x._pari_with_name(), ker._pari_with_name()) ** p
-    frob = Kx(frob_pari.lift())
 
-    # Confirm sign using y.
+    # Don't compute Frobenius using x^p mod h.
+    # First compute y^p mod h, then compute x^p from y^2p
+    # (See Gaudry-Morain)
     # Y ^ (p-1) = (X^3 + A X + B)^(p-1)/2
     y_pm1_pari = pari.Mod(
         (x**3 + A * x + B)._pari_with_name(), ker._pari_with_name()
     ) ** ((p - 1) // 2)
     y_pm1 = Kx(y_pm1_pari.lift())
     # Frob(X,Y) = (X^p, Y^(p-1) Y)
+
+    y2p = (y_pm1**2 * (x**3 + A * x + B)) % ker
+    frob = xp_from_cubicp(ker, y2p, A, B)
 
     verbose(f"computed frobenius on kernel", t=t0, level=2)
 

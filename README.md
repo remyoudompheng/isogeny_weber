@@ -141,6 +141,16 @@ when working over an extension field depending on CPU performance.
 ## Application to point counting
 
 As an application, a toy implementation of the SEA algorithm
-for point counting is provided. It can handle (very slowly) prime moduli
+for point counting is provided. It can handle prime moduli
 up to approximately 1.4L bits if modular polynomial up to level L
 are provided.
+
+For example, using a 200 MiB database of modular polynomials
+encoded as described above, curves with size up to 2000 bits
+can be processed in a few hours on an average home computer.
+
+There is an extra cost compared to standard modular polynomials
+because the f-invariant may be in a larger field extension.
+The associated extra cost is either O(l) for each prime
+(asymptotically negligible) or comparable to SEA running time
+(then it may be up to 50% of total time) when the curve has no 2-torsion point.
