@@ -894,24 +894,84 @@ def elkies_trace(E, l, f, wp, roots, weber_db, wxy=None):
     bound = ZZ(l).isqrt() + 1
     Mul1 = EllMultiples(ker, bound, A, B, x)
     MulF = EllMultiples(ker, bound, A, B, frob)
-    x1s = [Mul1.x(i) for i in range(1, bound + 1)]
     eigen = None
-    for i in range(1, bound + 1):
-        xFi = MulF.x(i)
-        if xFi in x1s:
-            # i * Frob(x) = j * x
-            j = x1s.index(xFi) + 1
-            eigen = mod(j, l) / mod(i, l)
-            yFi = MulF.y(i, y_pm1)
-            y1j = Mul1.y(j, 1)
-            if yFi == -y1j:
-                eigen = -eigen
-            else:
-                assert yFi == y1j
-            tr = eigen + mod(p, l) / eigen
-            verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
-            return tr
-    raise ValueError("impossible")
+    if l >= 400:
+        # Use Montgomery's batch inversion to avoid 2*bound modular inversions
+        # See Gaudry-Morain, section 6.1
+        x1s = [Mul1.xfrac(i) for i in range(1, bound + 1)]
+        xFs = [MulF.xfrac(i) for i in range(1, bound + 1)]
+        v1s, vFs = _batch_clear_denominators(x1s, xFs, ker)
+        i = next(_i for _i in range(1, bound + 1) if vFs[_i - 1] in v1s)
+        vFi = vFs[i - 1]
+        # i * Frob(x) = j * x
+        j = v1s.index(vFi) + 1
+        eigen = mod(j, l) / mod(i, l)
+    else:
+        # For "small" l, batch inversion is not fast enough compared
+        # to plain inversion.
+        x1s = [Mul1.x(i) for i in range(1, bound + 1)]
+        for i in range(1, bound + 1):
+            xFi = MulF.x(i)
+            if xFi in x1s:
+                # i * Frob(x) = j * x
+                j = x1s.index(xFi) + 1
+                eigen = mod(j, l) / mod(i, l)
+                break
+
+    assert eigen is not None
+    yFi = MulF.y(i, y_pm1)
+    y1j = Mul1.y(j, 1)
+    if yFi == -y1j:
+        eigen = -eigen
+    else:
+        assert yFi == y1j
+    tr = eigen + mod(p, l) / eigen
+    verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
+    return tr
+
+
+def _batch_clear_denominators(xs, ys, mod):
+    """
+    Given 2 list of fractions xs=[(n,d)...] ys=[(n,d)...]
+    in Frac(R/mod), multiply by a common element
+    to clear all denominators.
+    """
+    Kx = mod.parent()
+    # Multiply with cumulative products of denominators,
+    # from the left and from the right
+    vxs = [_num for _num, _ in xs]
+    vys = [_num for _num, _ in ys]
+    l = len(xs)
+    # Clear denominators of xs
+    prodX = Kx(1)
+    for i in range(l):
+        if i > 0:
+            vxs[i] = (vxs[i] * prodX) % mod
+        prodX = (prodX * xs[i][1]) % mod
+    prodXrev = Kx(1)
+    for i, (_, _den) in enumerate(reversed(xs)):
+        if i > 0:
+            vxs[l - 1 - i] *= prodXrev
+            vxs[l - 1 - i] %= mod
+        prodXrev = (prodXrev * _den) % mod
+    # Clear denominators of ys
+    prodY = Kx(1)
+    for i in range(l):
+        if i > 0:
+            vys[i] *= prodY
+        prodY = (prodY * ys[i][1]) % mod
+    prodYrev = Kx(1)
+    for i, (_, _den) in enumerate(reversed(ys)):
+        if i > 0:
+            vys[l - 1 - i] *= prodYrev
+        prodYrev = (prodYrev * _den) % mod
+    # Adjust factors
+    for i in range(l):
+        vxs[i] = (vxs[i] * prodY) % mod
+        vys[i] = (vys[i] * prodX) % mod
+        #assert (vxs[i] * xs[i][1]) % mod == (xs[i][0] * prodX * prodY) % mod
+        #assert (vys[i] * ys[i][1]) % mod == (ys[i][0] * prodX * prodY) % mod
+    return vxs, vys
 
 
 class EllMultiples:
@@ -947,6 +1007,15 @@ class EllMultiples:
         # The product psi_pm[i] = psi[i-1] * psi[i+1]
         self._psi_pm = [None for _ in range(m + 3)]
         # We allocate until n+1 because y(n) needs psi(n+2)
+
+    def xfrac(self, n):
+        """
+        The x coordinate of nP: x - psi[n-1]psi[n+1]/psi[n]^2
+        expressed as a formal fraction.
+        """
+        num = (self._x0 * self.psi2(n) - self.psi_pm(n)) % self._modulus
+        den = self.psi2(n)
+        return (num, den)
 
     def x(self, n):
         # x - [n-1][n+1]/[n]^2
