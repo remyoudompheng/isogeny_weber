@@ -2,10 +2,28 @@
 Helper functions for polynomial computations
 """
 
-from sage.all import ZZ
-
+from sage.all import ZZ, pari
+import sys
+try:
+    from . import ntlext as _ntlext
+    print("NTL extensions are available", file=sys.stderr)
+except ImportError:
+    _ntlext = None
+    print("NTL Cython extensions NOT available", file=sys.stderr)
 
 def frobenius_mod(h, p):
+    res = _frobenius_mod_ntl(h, p)
+    if res is None:
+        res = _frobenius_mod_squareshift(h, p)
+    return res
+
+def _frobenius_mod_ntl(h, p):
+    if _ntlext is not None and hasattr(h, "ntl_ZZ_pX"):
+        res = _ntlext.xpow(p, h.ntl_ZZ_pX())
+        return h.parent()(res, construct=True)
+    return None
+
+def _frobenius_mod_squareshift(h, p):
     """
     Frobenius element in k[x]/h, i.e. x^p mod h
 
@@ -19,6 +37,64 @@ def frobenius_mod(h, p):
         res = res.shift(d)
     return res % h
 
+def powmod(f, e, h):
+    """
+    Modular exponentiation, using NTL with fallback on PARI
+    """
+    res = powmod_ntl(f, e, h)
+    if res is None:
+        res_pari = pari.Mod(f._pari_with_name(), h._pari_with_name())**e
+        res = h.parent()(res_pari.lift())
+    return res
+
+def powmod_ntl(f, e, h):
+    if _ntlext is not None and hasattr(h, "ntl_ZZ_pX"):
+        if f.degree() >= h.degree():
+            f = f % h # NTL needs this
+        res = _ntlext.powmod(f.ntl_ZZ_pX(), e, h.ntl_ZZ_pX())
+        return h.parent()(res, construct=True)
+    return None
+
+def modular_composition(f, g, modulus):
+    if _ntlext is not None:
+        res = _ntlext.compmod(f.ntl_ZZ_pX(), g.ntl_ZZ_pX(), modulus.ntl_ZZ_pX())
+        return modulus.parent()(res, construct=True)
+    return modular_automorphism(modulus, g)(f)
+
+def modular_automorphism(modulus, xp):
+    """
+    Assumes that the automorphism group is abelian.
+
+    Returns a function F such that F(g) is actually
+    the modular composition g(F)
+
+    xp can be the Frobenius or a scalar multiplication automorphism.
+    """
+    # If f = sum(fi x^i), f(g) = sum(fi g^i)
+    # Brent-Kung method:
+    # Writing indices i = at+b the sum becomes:
+    # sum(a=0..deg/t, g^at * sum(b=0..t, f[at+b] g^b))
+    t = modulus.degree().isqrt() + 1
+    smalls = [modulus.parent()(1), xp]
+    while len(smalls) < t:
+        smalls.append((smalls[-1] * xp) % modulus)
+    xpt = (smalls[-1] * xp) % modulus
+
+    def f(pol):
+        if pol == 0:
+            return pol
+        blocks = [
+            sum(pol[a + b] * smalls[b] for b in range(t) if a + b <= pol.degree())
+            for a in range(0, pol.degree() + 1, t)
+        ]
+        # Compute sum(blocks[a] xp^at) by Horner rule
+        res = blocks[-1]
+        for b in reversed(blocks[:-1]):
+            res = (res * xpt) % modulus
+            res += b
+        return res
+
+    return f
 
 def fast_adams_operator(p, k):
     """

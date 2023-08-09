@@ -11,6 +11,7 @@ BITS = 48
 
 proof.arithmetic(False)
 
+
 def test_finvariants():
     for deg in (1, 2, 3):
         print(f"Base field GF(p^{deg})")
@@ -35,6 +36,7 @@ def test_finvariants():
                 r = cubic.roots()[0][0]
                 pass
         print(f"tested {N} j, {irr} irreducible cubics in {cputime(t):.3f}s")
+
 
 if __name__ == "__main__":
     main()

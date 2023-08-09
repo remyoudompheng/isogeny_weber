@@ -15,6 +15,7 @@ https://hal.science/inria-00001009
 """
 
 from sage.all import GF, random_prime, pari, cputime, ZZ
+from isogeny_weber.polynomials import _frobenius_mod_ntl
 
 
 class Poly3Ring:
@@ -180,6 +181,11 @@ for psize in range(250, 2000, 250):
         xp2 = frobenius(h, p)
         print(f"Custom x^p mod h computed in {cputime(t0):.3f}s")
         assert xp == xp2
+
+        t0 = cputime()
+        xpN = _frobenius_mod_ntl(h, p)
+        print(f"NTL x^p mod h computed in {cputime(t0):.3f}s")
+        assert xp == xpN
 
         t0 = cputime()
         xp_pari = pari.Mod(x._pari_with_name(), h._pari_with_name()) ** p

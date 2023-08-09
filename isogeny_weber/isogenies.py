@@ -14,13 +14,11 @@ from sage.all import (
     EllipticCurve,
     GF,
     ZZ,
-    Zmod,
     cputime,
     euler_phi,
     factor,
     legendre_symbol,
     mod,
-    pari,
     polygen,
     prod,
     two_squares,
@@ -29,7 +27,13 @@ from sage.all import (
 from sage.misc.verbose import verbose
 
 from .poldb import Database
-from .polynomials import frobenius_mod, fast_adams_operator, xp_from_cubicp
+from .polynomials import (
+    frobenius_mod,
+    fast_adams_operator,
+    powmod,
+    modular_composition,
+    xp_from_cubicp,
+)
 
 
 def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=True):
@@ -598,16 +602,19 @@ def _order_of_frobenius(modulus, frob, limit=None):
     """
     if limit is None:
         limit = modulus.degree()
-    f = _modular_automorphism(modulus, frob)
     x = modulus.parent().gen()
     if frob == x:
         return 1
+
+    def comp(f, g):
+        return modular_composition(f, g, modulus)
+
     t0 = cputime()
     ops = 0
     if limit <= 5:
         fn, exp = frob, 1
         while fn != x:
-            fn, exp = f(fn), exp + 1
+            fn, exp = comp(frob, fn), exp + 1
             ops += 1
             if exp >= limit:
                 break
@@ -623,7 +630,7 @@ def _order_of_frobenius(modulus, frob, limit=None):
         t = ZZ(limit.isqrt() + 1)
         bs = [x, frob]
         while len(bs) < t:
-            bs.append(f(bs[-1]))
+            bs.append(comp(frob, bs[-1]))
             ops += 1
             if bs[-1] == x:
                 verbose(
@@ -633,22 +640,22 @@ def _order_of_frobenius(modulus, frob, limit=None):
                 )
                 return len(bs) - 1
         # frobt = Frob^(t*exp)
-        frobt, exp = f(bs[-1]), 1
-        ft = _modular_automorphism(modulus, frobt)
+        frobkt, exp = comp(frob, bs[-1]), 1
+        ft = frobkt
         ops += 1
         for _ in range(limit // t):
-            if frobt in bs:
-                j = bs.index(frobt)
+            if frobkt in bs:
+                j = bs.index(frobkt)
                 verbose(
                     f"Found Frobenius order={t*exp-j} using {ops} mod compositions",
                     t=t0,
                     level=2,
                 )
                 return t * exp - j
-            frobt, exp = ft(frobt), exp + 1
+            frobkt, exp = comp(ft, frobkt), exp + 1
             ops += 1
-        if frobt in bs:
-            j = bs.index(frobt)
+        if frobkt in bs:
+            j = bs.index(frobkt)
             verbose(
                 f"Found Frobenius order={t*exp-j} using {ops} mod compositions",
                 t=t0,
@@ -797,15 +804,19 @@ def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
     # Don't compute Frobenius using x^p mod h.
     # First compute y^p mod h, then compute x^p from y^2p
     # (See Gaudry-Morain)
-    # Y ^ (p-1) = (X^3 + A X + B)^(p-1)/2
-    y_pm1_pari = pari.Mod(
-        (x**3 + A * x + B)._pari_with_name(), ker._pari_with_name()
-    ) ** ((p - 1) // 2)
-    y_pm1 = Kx(y_pm1_pari.lift())
+
+    # Y^(p-1) = (X^3 + A X + B)^(p-1)/2
+    y_pm1 = powmod(x**3 + A * x + B, (p - 1) // 2, ker)
     # Frob(X,Y) = (X^p, Y^(p-1) Y)
 
-    y2p = (y_pm1**2 * (x**3 + A * x + B)) % ker
-    frob = xp_from_cubicp(ker, y2p, A, B)
+    # But NTL x^p is very fast and handmade modular composition
+    # is only interesting when l is "relatively" small,
+    # because O(l sqrt(l)) is not far from O(log p).
+    if l < p.bit_length() // 3:
+        y2p = (y_pm1**2 * (x**3 + A * x + B)) % ker
+        frob = xp_from_cubicp(ker, y2p, A, B)
+    else:
+        frob = frobenius_mod(ker, p)
 
     verbose(f"computed frobenius on kernel", t=t0, level=2)
 
@@ -840,42 +851,6 @@ def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
             verbose(f"Elkies {l} found eigenvalue {eigen} trace={tr}", t=t0, level=2)
             return tr
     raise ValueError("impossible")
-
-
-def _modular_automorphism(modulus, xp):
-    """
-    Assumes that the automorphism group is abelian.
-
-    Returns a function F such that F(g) is actually
-    the modular composition g(F)
-
-    xp can be the Frobenius or a scalar multiplication automorphism.
-    """
-    # If f = sum(fi x^i), f(g) = sum(fi g^i)
-    # Brent-Kung method:
-    # Writing indices i = at+b the sum becomes:
-    # sum(a=0..deg/t, g^at * sum(b=0..t, f[at+b] g^b))
-    t = modulus.degree().isqrt() + 1
-    smalls = [modulus.parent()(1), xp]
-    while len(smalls) < t:
-        smalls.append((smalls[-1] * xp) % modulus)
-    xpt = (smalls[-1] * xp) % modulus
-
-    def f(pol):
-        if pol == 0:
-            return pol
-        blocks = [
-            sum(pol[a + b] * smalls[b] for b in range(t) if a + b <= pol.degree())
-            for a in range(0, pol.degree() + 1, t)
-        ]
-        # Compute sum(blocks[a] xp^at) by Horner rule
-        res = blocks[-1]
-        for b in reversed(blocks[:-1]):
-            res = (res * xpt) % modulus
-            res += b
-        return res
-
-    return f
 
 
 class EllMultiples:
