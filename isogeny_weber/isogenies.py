@@ -414,7 +414,8 @@ def trace_of_frobenius(E, weber_db=Database()):
     verbose(f"f-invariant in field GF(p^{Kext.degree()})")
 
     # How much bruteforce can we do?
-    atkin_budget = int(p.bit_length() ** 4)
+    # The real cost will be about sqrt(budget), preferably less than 10^6
+    atkin_budget = int(100 * p.bit_length() ** 3)
 
     crt_mods = []
     crt_vals = []
@@ -440,7 +441,7 @@ def trace_of_frobenius(E, weber_db=Database()):
         raise ValueError(f"not enough modular polynomials for {p.bit_length()}-bit p")
 
     scalar_muls = {}
-    for l in ls:
+    for lidx, l in enumerate(ls):
         wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
         t0 = cputime()
         roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
@@ -465,21 +466,21 @@ def trace_of_frobenius(E, weber_db=Database()):
             parity_s = 0 if legendre_symbol(p, l) == 1 else 1
             rs = [d for d in ZZ(l + 1).divisors() if ((l + 1) // d) % 2 == parity_s]
             good_rs = [_r for _r in rs if euler_phi(_r) <= min(32, 2 * ZZ(l).isqrt())]
-            r = None
             if good_rs:
                 r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs))
-            if r is not None:
-                ts = atkin_traces(p, l, r)
-                if len(ts) == 1:
-                    verbose(f"factor degree {r} => trace={list(ts)[0]}", level=2)
-                    crt_mods.append(l)
-                    crt_vals.append(ts.pop())
-                else:
-                    verbose(f"factor degree {r} => {len(ts)} traces", level=2)
-                    atkin_choices[l] = ts
-                verbose(f"processed Atkin prime {l} ({len(ts)} traces)", t=t0)
+                if r is not None:
+                    rs = [r]
+            ts = atkin_traces(p, l, rs)
+            if len(ts) == 1:
+                verbose(f"factor degree {r} => trace={list(ts)[0]}", level=2)
+                verbose(f"processed Atkin prime {l} (trace={list(ts)[0]})", t=t0)
+                crt_mods.append(l)
+                crt_vals.append(ts.pop())
             else:
-                verbose(f"processed Atkin prime {l} (too many traces)", t=t0)
+                r = rs[0] if len(rs) == 1 else "unknown"
+                verbose(f"factor degree {r} => {len(ts)} traces", level=2)
+                atkin_choices[l] = ts
+                verbose(f"processed Atkin prime {l} ({len(ts)} traces)", t=t0)
         elif len(roots) in (1, l + 1):
             if len(roots) == l + 1:
                 verbose(
@@ -504,19 +505,17 @@ def trace_of_frobenius(E, weber_db=Database()):
             if atkin_cost > atkin_budget:
                 best_atkins = sort_atkins[:i]
                 break
-        atkin_cost = prod(len(atkin_choices[_l]) for _l in best_atkins)
-        atkin_gain = prod(best_atkins) // atkin_cost // 2 + 1
-        if crt_mods[-1] == l and len(crt_mods) % 5 == 0:
-            verbose(f"Progress: {prod(crt_mods).bit_length()} known bits", t=t_start)
-            verbose(
-                f"Progress: {atkin_gain.bit_length()} additional bits from Atkin primes {best_atkins} (2^{atkin_cost.bit_length()} brute force)"
-            )
-            candidates = target // atkin_gain // prod(crt_mods) + 1
-            if candidates >> 100 == 0:
-                verbose(f"~{candidates} remaining candidates")
+        candidates, atkin_gain = _sea_progress(
+            target,
+            crt_mods,
+            atkin_choices,
+            best_atkins,
+            log_ts=t_start if (lidx % 5 == 4) else None,
+        )
         # Exit if done
-        if prod(crt_mods) * atkin_gain > target:
+        if candidates < p.bit_length():
             break
+    verbose(f"~{candidates} remaining candidates")
     prod_e = prod(crt_mods)
     verbose(f"Product of Elkies primes {prod_e} ({prod_e.bit_length()} bits)")
     verbose(
@@ -525,8 +524,10 @@ def trace_of_frobenius(E, weber_db=Database()):
     verbose(f"Traces: {list(zip(crt_mods, crt_vals))}", level=2)
     # Apply Atkin algorithm and CRT
     tr = CRT(crt_vals, crt_mods)
-    if tr > prod(crt_mods) // 2:
-        tr -= prod(crt_mods)
+    crt_prod = prod(crt_mods)
+    if tr > crt_prod // 2:
+        tr -= crt_prod
+    verbose(f"CRT result: {tr}", t=t_start)
     sort_atkins = sorted(
         atkin_choices,
         key=lambda t: -math.log(t) / math.log(len(atkin_choices[t])),
@@ -541,21 +542,53 @@ def trace_of_frobenius(E, weber_db=Database()):
             f"Select additional Atkin prime {best_atkins[-1]}, ~{candidates} candidates"
         )
     for al in best_atkins:
-        verbose(f"Atkin prime {al}: traces {sorted(atkin_choices[al])}")
+        verbose(f"Atkin prime {al}: traces {sorted(atkin_choices[al])}", level=2)
     if best_atkins:
         trs = match_atkin(2 * p.isqrt() + 1, prod_e, tr, best_atkins, atkin_choices)
-        while len(trs) > 1:
-            # Extremely rare
-            pt = E.random_point()
-            trs = [t for t in trs if ZZ(p + 1 - t) * pt == 0]
-            verbose(f"{len(trs)} candidate traces after checking a random point")
-        tr = trs[0]
+    else:
+        bound = 2 * p.isqrt() + 1
+        trs = list(range(tr, bound + 1, crt_prod))
+        trs += list(range(tr - crt_prod, -bound - 1, -crt_prod))
+        verbose(f"{len(trs)} candidate traces after CRT")
+    while len(trs) > 1:
+        pt = E.random_point()
+        trs = [t for t in trs if ZZ(p + 1 - t) * pt == 0]
+        verbose(f"{len(trs)} candidate traces after checking a random point")
+    tr = trs[0]
     assert abs(tr) <= 2 * p.isqrt(), tr
     verbose(f"Trace of Frobenius: {tr}", t=t_start)
     checks = len(crt_mods)
     E.set_order(p + 1 - tr, check=True, num_checks=checks)
     verbose(f"Order of E checked using {checks} random points")
     return tr
+
+
+def _sea_progress(target, crt_mods, atkin_choices, best_atkins, log_ts=None):
+    atkin_cost = prod(len(atkin_choices[_l]) for _l in best_atkins)
+    atkin_gain = prod(best_atkins) // atkin_cost + 1
+    atkin_gain2 = (
+        prod(atkin_choices) // prod(len(_trs) for _trs in atkin_choices.values()) + 1
+    )
+    nE = target // prod(crt_mods) + 1
+    nEA = target // prod(crt_mods) // atkin_gain + 1
+    nEAA = target // prod(crt_mods) // atkin_gain2 + 1
+
+    def fmt(n):
+        return f"~2^{n.bit_length()-1}" if n >> 40 else f"~{n}"
+
+    if log_ts:
+        verbose(
+            f"Progress: {prod(crt_mods).bit_length()} known bits + {atkin_gain.bit_length()} from {len(best_atkins)} Atkin primes",
+            t=log_ts,
+        )
+        verbose(
+            f"Selected Atkin primes: {best_atkins} (~2^{atkin_cost.bit_length()} traces)",
+            level=2,
+        )
+        verbose(
+            f"Remaining candidates: {fmt(nE)} (Elkies), {fmt(nEA)} (Elkies + {len(best_atkins)} Atkin), {fmt(nEAA)} (all info)"
+        )
+    return nEA, atkin_gain
 
 
 def _order_of_frobenius(modulus, frob, limit=None):
@@ -630,10 +663,10 @@ def _order_of_frobenius(modulus, frob, limit=None):
     return None
 
 
-def atkin_traces(p, l, r):
+def atkin_traces(p, l, rs: list):
     """
     Returns the list of possible Frobenius traces from the known
-    order of Frobenius in GF(l^2)/GF(l)
+    order (or candidate orders) of Frobenius in GF(l^2)/GF(l)
     """
     # If kernels are defined over GF(p^r), Frobenius^r has
     # rational eigenvalues
@@ -646,7 +679,7 @@ def atkin_traces(p, l, r):
         ab = (x**2 - t * x + p).roots(ring=Kl2, multiplicities=False)
         if len(ab) == 2:
             a, b = ab
-            if (a / b).multiplicative_order() == r:
+            if (a / b).multiplicative_order() in rs:
                 traces.add(t)
     return sorted(traces)
 
@@ -666,8 +699,10 @@ def match_atkin(bound, crtmod, crtval, atk_primes, atk_traces: dict):
         cost1 *= len(atk_traces[l])
         atk1.append(l)
     atk2 = [l for l in atk_primes if l not in atk1]
-    verbose(f"set A = {cost1} traces modulo {'*'.join(str(a) for a in atk1)}")
-    verbose(f"set B = {cost//cost1} traces modulo {'*'.join(str(a) for a in atk2)}")
+    verbose(f"set A = {cost1} traces modulo {'*'.join(str(a) for a in atk1)}", level=2)
+    verbose(
+        f"set B = {cost//cost1} traces modulo {'*'.join(str(a) for a in atk2)}", level=2
+    )
 
     # Apply CRT to each set
     b1 = CRT_basis(atk1)
@@ -695,28 +730,32 @@ def match_atkin(bound, crtmod, crtval, atk_primes, atk_traces: dict):
     verbose(f"Total CRT modulus {mod}", level=2)
     pa, pb = CRT_basis([crtmod * p1, p2])
     crt1 = [(pa * c + mod // 2) % mod - mod // 2 for c in crt1]
-    crt2 = [(pb * c + mod // 2) % mod - mod // 2 for c in crt2]
-    crt2 += [c - mod for c in crt2] + [c + mod for c in crt2]
-    crt2.sort()
-    assert mod > 4 * bound
+    crt1.sort()
+    crt2b = []
+    for c in crt2:
+        cc = (pb * c + mod // 2) % mod - mod // 2
+        for ccc in range(cc, 2 * bound + 1 - crt1[0], mod):
+            crt2b.append(ccc)
+        for ccc in range(cc, -2 * bound - 1 - crt1[-1], -mod):
+            crt2b.append(ccc)
+    crt2 = sorted(set(crt2b))
+    del crt2b
 
     # Now find a match
+    crt_matches = 0
     matches = []
     for c1 in crt1:
         c2min, c2max = -bound - c1, bound - c1
         imin = bisect.bisect_left(crt2, c2min)
         imax = bisect.bisect_right(crt2, c2max)
         for i in range(imin, imax):
-            if abs(c1 + crt2[i]) < bound:
-                matches.append(c1 + crt2[i])
-    verbose(f"{len(matches)} candidates found after CRT meet-in-the-middle", level=2)
-    res = []
-    for m in matches:
-        if all(m % l in ts for l, ts in atk_traces.items()):
-            res.append(m)
-            # verbose(f"possible trace {m}", level=3)
-    verbose(f"Atkin match done: {len(res)} solutions", t=t0)
-    return res
+            if abs(m := c1 + crt2[i]) < bound:
+                crt_matches += 1
+                if all(m % l in ts for l, ts in atk_traces.items()):
+                    matches.append(m)
+    verbose(f"{crt_matches} candidates found by CRT within Hasse-Weil bound")
+    verbose(f"Atkin match done: {len(matches)} solutions", t=t0)
+    return matches
 
 
 def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
