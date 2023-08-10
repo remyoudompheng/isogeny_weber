@@ -14,7 +14,15 @@ from cysignals.signals cimport sig_on, sig_off
 from sage.rings.integer cimport Integer
 from sage.libs.ntl.ntl_ZZ_p cimport ntl_ZZ_p
 from sage.libs.ntl.types cimport ZZ_pX_Modulus_c, ZZ_pContext_c
-from sage.libs.ntl.ZZ_pX cimport ZZ_pX_CompMod, ZZ_pX_PowerMod_pre, ZZ_pX_PowerXMod_pre, ZZ_pX_Modulus_build
+from sage.libs.ntl.ZZ_pX cimport (
+    ZZ_pX_MulTrunc,
+    ZZ_pX_SqrTrunc,
+    ZZ_pX_InvTrunc,
+    ZZ_pX_CompMod,
+    ZZ_pX_PowerMod_pre,
+    ZZ_pX_PowerXMod_pre,
+    ZZ_pX_Modulus_build
+)
 from sage.libs.ntl.ntl_ZZ cimport ntl_ZZ
 from sage.libs.ntl.ntl_ZZ_pX cimport ntl_ZZ_pX, ntl_ZZ_pX_Modulus
 
@@ -54,4 +62,27 @@ def compmod(ntl_ZZ_pX f, ntl_ZZ_pX g, ntl_ZZ_pX modulus):
     sig_off()
     return r
    
+def mul_trunc(ntl_ZZ_pX f, ntl_ZZ_pX g, long d):
+    "Product modulo x^d"
+    cdef ntl_ZZ_pX r = f._new()
+    sig_on()
+    ZZ_pX_MulTrunc(r.x, f.x, g.x, d)
+    sig_off()
+    return r
+
+def sqr_trunc(ntl_ZZ_pX f, long d):
+    "Square modulo x^d"
+    cdef ntl_ZZ_pX r = f._new()
+    sig_on()
+    ZZ_pX_SqrTrunc(r.x, f.x, d)
+    sig_off()
+    return r
+
+def inv_trunc(ntl_ZZ_pX f, long d):
+    "Inverse modulo x^d"
+    cdef ntl_ZZ_pX r = f._new()
+    sig_on()
+    ZZ_pX_InvTrunc(r.x, f.x, d)
+    sig_off()
+    return r
 

@@ -4,12 +4,15 @@ Helper functions for polynomial computations
 
 from sage.all import ZZ, pari
 import sys
+
 try:
     from . import ntlext as _ntlext
+
     print("NTL extensions are available", file=sys.stderr)
 except ImportError:
     _ntlext = None
     print("NTL Cython extensions NOT available", file=sys.stderr)
+
 
 def frobenius_mod(h, p):
     res = _frobenius_mod_ntl(h, p)
@@ -17,11 +20,13 @@ def frobenius_mod(h, p):
         res = _frobenius_mod_squareshift(h, p)
     return res
 
+
 def _frobenius_mod_ntl(h, p):
     if _ntlext is not None and hasattr(h, "ntl_ZZ_pX"):
         res = _ntlext.xpow(p, h.ntl_ZZ_pX())
         return h.parent()(res, construct=True)
     return None
+
 
 def _frobenius_mod_squareshift(h, p):
     """
@@ -37,29 +42,50 @@ def _frobenius_mod_squareshift(h, p):
         res = res.shift(d)
     return res % h
 
+
 def powmod(f, e, h):
     """
     Modular exponentiation, using NTL with fallback on PARI
     """
     res = powmod_ntl(f, e, h)
     if res is None:
-        res_pari = pari.Mod(f._pari_with_name(), h._pari_with_name())**e
+        res_pari = pari.Mod(f._pari_with_name(), h._pari_with_name()) ** e
         res = h.parent()(res_pari.lift())
     return res
+
 
 def powmod_ntl(f, e, h):
     if _ntlext is not None and hasattr(h, "ntl_ZZ_pX"):
         if f.degree() >= h.degree():
-            f = f % h # NTL needs this
+            f = f % h  # NTL needs this
         res = _ntlext.powmod(f.ntl_ZZ_pX(), e, h.ntl_ZZ_pX())
         return h.parent()(res, construct=True)
     return None
+
+
+def mul_trunc(f, g, n):
+    if _ntlext is not None and hasattr(f, "ntl_ZZ_pX"):
+        if f is g:
+            res = _ntlext.sqr_trunc(f.ntl_ZZ_pX(), n)
+        else:
+            res = _ntlext.mul_trunc(f.ntl_ZZ_pX(), g.ntl_ZZ_pX(), n)
+        return f.parent()(res, construct=True)
+    return f._mul_trunc_(n)
+
+
+def inv_trunc(f, n):
+    if _ntlext is not None and hasattr(f, "ntl_ZZ_pX"):
+        res = _ntlext.inv_trunc(f.ntl_ZZ_pX(), n)
+        return f.parent()(res, construct=True)
+    return f.inverse_series_trunc(n)
+
 
 def modular_composition(f, g, modulus):
     if _ntlext is not None:
         res = _ntlext.compmod(f.ntl_ZZ_pX(), g.ntl_ZZ_pX(), modulus.ntl_ZZ_pX())
         return modulus.parent()(res, construct=True)
     return modular_automorphism(modulus, g)(f)
+
 
 def modular_automorphism(modulus, xp):
     """
@@ -95,6 +121,7 @@ def modular_automorphism(modulus, xp):
         return res
 
     return f
+
 
 def fast_adams_operator(p, k):
     """

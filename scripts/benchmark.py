@@ -11,7 +11,7 @@ It it slower for supersingular curves over GF(p^2) (l+1 isogenies)
 import argparse
 import time
 
-from sage.all import GF, EllipticCurve, next_prime, random_prime, set_verbose
+from sage.all import GF, EllipticCurve, next_prime, random_prime, set_verbose, proof
 from isogeny_weber import Database, isogenies_prime_degree_weber
 
 if __name__ == "__main__":
@@ -27,6 +27,8 @@ if __name__ == "__main__":
     argp.add_argument("PBITS", type=int, help="size of modulus")
     argp.add_argument("EXTDEG", nargs="?", type=int, default=1)
     args = argp.parse_args()
+
+    proof.arithmetic(False)
 
     set_verbose(1)
     weber_db = Database(args.db)

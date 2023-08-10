@@ -33,6 +33,8 @@ from .polynomials import (
     powmod,
     modular_composition,
     xp_from_cubicp,
+    mul_trunc,
+    inv_trunc,
 )
 
 
@@ -75,6 +77,8 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
             K_ = (x**24 - f24).splitting_field("a")
             if f is None or K_.degree() < f.parent().degree():
                 Kext, f = K_, K_(f24).nth_root(24)
+                if f in K:
+                    Kext, f = K, K(f)
     assert f is not None and eqf24(f**24) == 0
     verbose(f"domain j={j}")
     verbose(f"f-invariant in field {Kext}")
@@ -126,7 +130,7 @@ def _weber_poly_descent(wpoly, Kbase, f, force=False):
     """
     # Use built-in root solving if already working on the base field
     # or if extension field is small.
-    if f in Kbase or (not force and f.parent().order().bit_length() < 256):
+    if f.parent() is Kbase or (not force and f.parent().order().bit_length() < 256):
 
         def convert(r):
             r = f.parent()(r)
@@ -218,8 +222,17 @@ def _weber_poly_roots(wpoly, Kbase, f, j):
     Compute roots of the Weber modular polynomial Wl(f, x)
     and iterates over (f2, j2, multiplicity)
     """
-    pol, map_ = _weber_poly_descent(wpoly, Kbase, f)
-    for r, mult in _fast_pari_roots(pol):
+    pol, map_ = _weber_poly_descent(wpoly, Kbase, f, force=True)
+    if not pol.is_squarefree():
+        roots = pol.roots()
+    else:
+        # Compute Frobenius using a fast library.
+        assert pol.base_ring().order() == Kbase.order()
+        p = Kbase.order()
+        frob = frobenius_mod(pol, p)
+        (x,) = pol.variables()
+        roots = (frob - x).gcd(pol).roots()
+    for r, mult in roots:
         for f2, j2 in map_(r):
             yield f2, j2, mult
 
@@ -243,15 +256,6 @@ def _weber_poly_roots_frobenius(wpoly, Kbase, f):
     return [(f, j) for rt in roots for f, j in map_(rt)], pol, frob
 
 
-def _fast_pari_roots(poly):
-    if not poly.is_squarefree():
-        return poly.roots()
-    # it's squarefree
-    paripoly = poly._pari_with_name()
-    R = poly.base_ring()
-    return [(R(r), 1) for r in paripoly.polrootsmod()]
-
-
 def _fast_elkies(E1, E2, l):
     """
     Compute the unique normalized isogeny of degree l between E1 and E2
@@ -272,7 +276,7 @@ def _fast_elkies(E1, E2, l):
     Rx, x = E1.base_ring()["x"].objgen()
     # Compute C = 1/(1 + Ax^4 + Bx^6) mod x^4l
     A, B = E1.a4(), E1.a6()
-    C = (1 + A * x**4 + B * x**6).inverse_series_trunc(4 * l)
+    C = inv_trunc(1 + A * x**4 + B * x**6, 4 * l)
     # Solve differential equation
     # The number of terms doubles at each iteration.
     # S'^2 = G(x,S) = (1 + A2 S^4 + B2 S^6) / (1 + Ax^4 + Bx^6)
@@ -286,24 +290,26 @@ def _fast_elkies(E1, E2, l):
             sprec = 2 * l
         # s1 => s1 + x^k s2
         # 2 s1' s2' - dG/dS(x, s1) s2 = G(x, s1) - s1'2
-        s1 = Rx(S).truncate(sprec)
+        s1 = S
         ds1 = s1.derivative()
-        s1pows = s1.add_bigoh(2 * sprec).powers(7)
+        s1pows = [1, s1]
+        while len(s1pows) < 7:
+            s1pows.append(mul_trunc(s1, s1pows[-1], 2 * sprec))
         GS = C * (1 + A2 * s1pows[4] + B2 * s1pows[6])
         dGS = C * (4 * A2 * s1pows[3] + 6 * B2 * s1pows[5])
         # s2' = (dGS / 2s1') s2 + (G(x, s1) - s1'2) / (2s1')
-        denom = (2 * ds1).inverse_series_trunc(2 * sprec)
-        a = dGS * denom
-        b = (GS - ds1**2) * denom
-        s2 = a.solve_linear_de(prec=2 * sprec, b=b, f0=0)
-        S = s1 + s2
+        denom = inv_trunc(2 * ds1, 2 * sprec)
+        a = mul_trunc(dGS, denom, 2 * sprec)
+        b = mul_trunc(GS - ds1**2, denom, 2 * sprec)
+        s2 = a.add_bigoh(2 * sprec).solve_linear_de(prec=2 * sprec, b=b, f0=0)
+        S = s1 + Rx(s2)
         sprec = 2 * sprec
     # Reconstruct:
     # S = x * T(x^2)
     # Compute U = 1/T^2
     # Reconstruct N(1/x) / D(1/x) = U
-    T = Rx([S[2 * i + 1] for i in range(2 * l)]).add_bigoh(2 * l)
-    U = 1 / T**2
+    T = Rx([S[2 * i + 1] for i in range(2 * l)])
+    U = inv_trunc(mul_trunc(T, T, 2 * l), 2 * l)
     _, Q = Rx(U).rational_reconstruction(x ** (2 * l), l, l)
     Q = Q.add_bigoh((l + 1) // 2).sqrt()
     # Beware, reversing may not give the correct degree.
