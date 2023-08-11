@@ -18,7 +18,7 @@ def _parse_header(s, off):
     if large:
         # Large coefficient
         dx = (hdr >> 24) & 0x7F
-        dy = (hdr >> 11) & 0x7FF
+        dy = (hdr >> 11) & 0x1FFF
         sgn = (hdr >> 10) & 1
         alen = hdr & 0x3FF
     else:

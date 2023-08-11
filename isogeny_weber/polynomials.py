@@ -70,7 +70,7 @@ def mul_trunc(f, g, n):
         else:
             res = _ntlext.mul_trunc(f.ntl_ZZ_pX(), g.ntl_ZZ_pX(), n)
         return f.parent()(res, construct=True)
-    return f._mul_trunc_(n)
+    return f._mul_trunc_(g, n)
 
 
 def inv_trunc(f, n):
@@ -81,7 +81,7 @@ def inv_trunc(f, n):
 
 
 def modular_composition(f, g, modulus):
-    if _ntlext is not None:
+    if _ntlext is not None and hasattr(f, "ntl_ZZ_pX"):
         res = _ntlext.compmod(f.ntl_ZZ_pX(), g.ntl_ZZ_pX(), modulus.ntl_ZZ_pX())
         return modulus.parent()(res, construct=True)
     return modular_automorphism(modulus, g)(f)
