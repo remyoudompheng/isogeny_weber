@@ -6,6 +6,7 @@ polynomials.
 import bisect
 import itertools
 import math
+import time
 
 from sage.all import (
     BinaryQF,
@@ -22,6 +23,7 @@ from sage.all import (
     polygen,
     prod,
     two_squares,
+    parallel,
 )
 
 from sage.misc.verbose import verbose
@@ -336,7 +338,7 @@ def _fast_elkies(E1, E2, l):
 # https://hal.science/inria-00001009
 
 
-def trace_of_frobenius(E, weber_db=Database()):
+def trace_of_frobenius(E, weber_db=Database(), threads=1):
     """
     Compute the trace of Frobenius endomorphism for curve E
     defined over a prime field, as an element of Z.
@@ -371,7 +373,7 @@ def trace_of_frobenius(E, weber_db=Database()):
                 trs = [t for t in trs if ZZ(p + 1 - t) * pt == 0]
                 verbose(f"{len(trs)} candidate traces after checking a random point")
             tr = trs[0]
-        verbose(f"Trace of Frobenius: {tr}", t=t_start)
+        verbose(f"Trace of Frobenius: {tr} elapsed={time.time()-t_start}s")
         E.set_order(p + 1 - tr, check=True, num_checks=8)
         verbose(f"Order of E checked using 8 random points")
         return tr
@@ -392,7 +394,7 @@ def trace_of_frobenius(E, weber_db=Database()):
                 trs = [t for t in trs if ZZ(p + 1 - t) * pt == 0]
                 verbose(f"{len(trs)} candidate traces after checking a random point")
             tr = trs[0]
-        verbose(f"Trace of Frobenius: {tr}", t=t_start)
+        verbose(f"Trace of Frobenius: {tr} elapsed={time.time()-t_start}s")
         E.set_order(p + 1 - tr, check=True, num_checks=8)
         verbose(f"Order of E checked using 8 random points")
         return tr
@@ -450,59 +452,21 @@ def trace_of_frobenius(E, weber_db=Database()):
     if prod(ls) < target:
         raise ValueError(f"not enough modular polynomials for {p.bit_length()}-bit p")
 
-    scalar_muls = {}
-    for lidx, l in enumerate(ls):
-        wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
-        t0 = cputime()
-        roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
-        verbose(f"{len(roots)} roots for modular equation at level {l}", t=t0, level=2)
-        if any(j == K(1728) for _, j in roots):
+    args = [(E, l, f, K, Kext, weber_db) for l in ls]
+    for lidx, (_, (l, traces, j2s)) in enumerate(
+        possibly_parallel(threads)(trace_of_frobenius_modl)(args)
+    ):
+        if K(1728) in j2s:
             verbose(f"Curve is {l}-isogenous to j=1728")
             return trace_j1728()
-        if any(j == K(0) for _, j in roots):
+        if K(0) in j2s:
             verbose(f"Curve is {l}-isogenous to j=0")
             return trace_j0()
-        if len(roots) == 2:
-            r = None
-            tr = elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls=scalar_muls)
+        if len(traces) == 1:
             crt_mods.append(l)
-            crt_vals.append(ZZ(tr))
-            verbose(f"processed Elkies prime {l} (trace={tr})", t=t0)
-        elif len(roots) == 0:
-            # Compute order of Frobenius
-            # We are only interested in values of r giving few traces
-            # at most 32 and at most 2 sqrt(l)
-            # Parity of (l+1)/r is related to (p|l) (Schoof, Proposition 6.3)
-            parity_s = 0 if legendre_symbol(p, l) == 1 else 1
-            rs = [d for d in ZZ(l + 1).divisors() if ((l + 1) // d) % 2 == parity_s]
-            good_rs = [_r for _r in rs if euler_phi(_r) <= min(32, 2 * ZZ(l).isqrt())]
-            if good_rs:
-                r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs))
-                if r is not None:
-                    rs = [r]
-            ts = atkin_traces(p, l, rs)
-            if len(ts) == 1:
-                verbose(f"factor degree {r} => trace={list(ts)[0]}", level=2)
-                verbose(f"processed Atkin prime {l} (trace={list(ts)[0]})", t=t0)
-                crt_mods.append(l)
-                crt_vals.append(ts.pop())
-            else:
-                r = rs[0] if len(rs) == 1 else "unknown"
-                verbose(f"factor degree {r} => {len(ts)} traces", level=2)
-                atkin_choices[l] = ts
-                verbose(f"processed Atkin prime {l} ({len(ts)} traces)", t=t0)
-        elif len(roots) in (1, l + 1):
-            if len(roots) == l + 1:
-                verbose(
-                    f"Volcano inner node: t^2 - 4p is divisible by {l}^2", t=t0, level=2
-                )
-            else:
-                verbose(f"Double root: t^2 - 4p is divisible by {l}", t=t0, level=2)
-                r = 1
-            tr = elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls)
-            crt_mods.append(l)
-            crt_vals.append(ZZ(tr))
-            verbose(f"processed Elkies prime {l} (trace={tr}, double root)", t=t0)
+            crt_vals.append(ZZ(list(traces)[0]))
+        else:
+            atkin_choices[l] = sorted(traces)
         # Recompute best atkins
         sort_atkins = sorted(
             atkin_choices,
@@ -566,11 +530,79 @@ def trace_of_frobenius(E, weber_db=Database()):
         verbose(f"{len(trs)} candidate traces after checking a random point")
     tr = trs[0]
     assert abs(tr) <= 2 * p.isqrt(), tr
-    verbose(f"Trace of Frobenius: {tr}", t=t_start)
+    verbose(f"Trace of Frobenius: {tr} elapsed={time.time()-t_start}s")
     checks = len(crt_mods)
     E.set_order(p + 1 - tr, check=True, num_checks=checks)
     verbose(f"Order of E checked using {checks} random points")
     return tr
+
+
+def trace_of_frobenius_modl(E, l, f, K, Kext, weber_db):
+    t0 = cputime()
+    wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
+    roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
+    p = K.characteristic()
+    verbose(f"{len(roots)} roots for modular equation at level {l}", t=t0, level=2)
+    j2s = [j for _, j in roots]
+    if K(0) in j2s or K(1728) in j2s:
+        return l, None, j2s
+    if len(roots) == 2:
+        r = None
+        tr = elkies_trace(E, l, f, wp, roots, weber_db)
+        verbose(f"processed Elkies prime {l} (trace={tr})", t=t0)
+        return l, [tr], j2s
+    elif len(roots) == 0:
+        # Compute order of Frobenius
+        # We are only interested in values of r giving few traces
+        # at most 32 and at most 2 sqrt(l)
+        # Parity of (l+1)/r is related to (p|l) (Schoof, Proposition 6.3)
+        parity_s = 0 if legendre_symbol(p, l) == 1 else 1
+        rs = [d for d in ZZ(l + 1).divisors() if ((l + 1) // d) % 2 == parity_s]
+        good_rs = [_r for _r in rs if euler_phi(_r) <= min(32, 2 * ZZ(l).isqrt())]
+        if good_rs:
+            r = _order_of_frobenius(wdescent, wfrob, limit=max(good_rs))
+            if r is not None:
+                rs = [r]
+        ts = atkin_traces(p, l, rs)
+        if len(ts) == 1:
+            verbose(f"factor degree {r} => trace={list(ts)[0]}", level=2)
+            verbose(f"processed Atkin prime {l} (trace={list(ts)[0]})", t=t0)
+            return l, ts, j2s
+        else:
+            r = rs[0] if len(rs) == 1 else "unknown"
+            verbose(f"factor degree {r} => {len(ts)} traces", level=2)
+            verbose(f"processed Atkin prime {l} ({len(ts)} traces)", t=t0)
+            return l, ts, j2s
+    elif len(roots) in (1, l + 1):
+        if len(roots) == l + 1:
+            verbose(
+                f"Volcano inner node: t^2 - 4p is divisible by {l}^2", t=t0, level=2
+            )
+        else:
+            verbose(f"Double root: t^2 - 4p is divisible by {l}", t=t0, level=2)
+            r = 1
+        tr = elkies_trace(E, l, f, wp, roots, weber_db)
+        verbose(f"processed Elkies prime {l} (trace={tr}, double root)", t=t0)
+        return l, [tr], j2s
+    else:
+        print("IMPOSSIBLE")
+        print(l)
+        print(roots)
+        return l, list(range(l)), j2s
+
+
+def possibly_parallel(num_cores):
+    if num_cores == 1:
+
+        def _wrap(fun):
+            def _fun(args):
+                for a in args:
+                    yield ((a,), None), fun(*a)
+
+            return _fun
+
+        return _wrap
+    return parallel(num_cores)
 
 
 def _sea_progress(target, crt_mods, atkin_choices, best_atkins, log_ts=None):
@@ -588,8 +620,7 @@ def _sea_progress(target, crt_mods, atkin_choices, best_atkins, log_ts=None):
 
     if log_ts:
         verbose(
-            f"Progress: {prod(crt_mods).bit_length()} known bits + {atkin_gain.bit_length()} from {len(best_atkins)} Atkin primes",
-            t=log_ts,
+            f"Progress: {prod(crt_mods).bit_length()} known bits + {atkin_gain.bit_length()} from {len(best_atkins)} Atkin primes (elapsed={time.time()-log_ts}s)"
         )
         verbose(
             f"Selected Atkin primes: {best_atkins} (~2^{atkin_cost.bit_length()} traces)",
@@ -771,7 +802,7 @@ def match_atkin(bound, crtmod, crtval, atk_primes, atk_traces: dict):
     return matches
 
 
-def elkies_trace(E, l, f, wp, roots, weber_db, scalar_muls: dict):
+def elkies_trace(E, l, f, wp, roots, weber_db):
     """
     Compute Frobenius trace on isogeny kernel
 

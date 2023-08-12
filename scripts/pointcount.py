@@ -10,6 +10,7 @@ from isogeny_weber import *
 def main():
     argp = argparse.ArgumentParser()
     argp.add_argument("-v", action="count", default=0)
+    argp.add_argument("-t", type=int, default=1, help="Number of threads")
     argp.add_argument("--db", help="Path to Weber polynomial database")
     argp.add_argument(
         "--repeat", type=int, default=1, help="Number of tests to perform"
@@ -38,7 +39,7 @@ def main():
             break
         E = EllipticCurve(K, [A, B])
         print(E)
-        tr = trace_of_frobenius(E, weber_db=weber_db)
+        tr = trace_of_frobenius(E, weber_db=weber_db, threads=args.t)
         print("Trace of Frobenius:", tr)
         print("Order:", E.order())
         if p != args.PBITS:
