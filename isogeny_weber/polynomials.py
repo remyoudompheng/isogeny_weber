@@ -2,7 +2,7 @@
 Helper functions for polynomial computations
 """
 
-from sage.all import ZZ, pari
+from sage.all import ZZ, pari, PolynomialRing, prod
 import sys
 
 try:
@@ -12,6 +12,14 @@ try:
 except ImportError:
     _ntlext = None
     print("NTL Cython extensions NOT available", file=sys.stderr)
+
+try:
+    from . import flintext as _flintext
+
+    print("FLINT extensions are available", file=sys.stderr)
+except ImportError:
+    _flintext = None
+    print("FLINT Cython extensions NOT available", file=sys.stderr)
 
 
 def frobenius_mod(h, p):
@@ -296,3 +304,27 @@ class Poly3Ring:
         if (f2 * root**2 + f1 * root + f0) % self.h != 0:
             return None
         return root % self.h
+
+# Floating-point real/complex polynomials
+
+def real_poly_from_roots(rs, cs):
+    """
+    Returns a real polynomial (RealBall or RealField)
+    whose roots are real roots from `rs` and complex
+    roots from `cs`.
+    """
+    if _flintext is not None:
+        return _flintext.rx_from_roots(rs, cs)
+    else:
+        R, x = PolynomialRing(rs[0].parent(), "x").objgen()
+        factors = [x - t for t in rs]
+        factors += [x*x - 2*r.real()*x + R(r.mid().norm()) for r in cs]
+        return prod(factors)
+
+def real_poly_interpolate(xs, ys):
+    if _flintext is not None:
+        return _flintext.rx_interpolate(xs, ys)
+    else:
+        Rx = xs[0].parent()["x"]
+        return Rx.lagrange_polynomial(list(zip(xs, ys)))
+

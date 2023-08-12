@@ -138,6 +138,26 @@ If the base field is a prime field, computations usually take
 at most a few seconds even for `l=997`. It may take a couple of minutes
 when working over an extension field depending on CPU performance.
 
+## On-the-fly computation of Weber modular polynomials
+
+The module `isogeny_weber.poldb_compute` performs computations
+of Weber modular polynomials. It does not use the isogeny volcano
+algorithm, but transcendental methods from:
+
+Andreas Enge, Computing modular polynomials in quasi-linear time,
+Math. Comp. 78 (2009), 1809-1824
+doi:10.1090/S0025-5718-09-02199-1
+
+The fast computation functions from FLINT library are used.
+This is usually faster than PARI `polmodular(l, 1)` which uses
+isogeny volcanoes to compute Weber modular polynomials.
+
+It takes a few minutes to recompute polynomials for l < 1000
+and about an hour to recompute polynomials for l < 2000.
+
+Note that in the case of SEA, the coefficients of Weber modular polynomials
+have approximately the same size as the base field.
+
 ## Application to point counting
 
 As an application, a toy implementation of the SEA algorithm
