@@ -80,7 +80,7 @@ def weber_modular_poly_coeffs(l):
         zs.append(z)
         polys.append(pol)
     verbose(
-        f"Evaluated Φ[l] ({prec=}) at {eval_points} points {float(zs[0]):.9f}...{float(zs[-1]):.9f}",
+        f"Evaluated Φ[{l}] ({prec=}) at {eval_points} points {float(zs[0]):.9f}...{float(zs[-1]):.9f}",
         level=2,
     )
     pol = {}
@@ -180,5 +180,7 @@ def needed_precision(l):
     True
     >>> needed_precision(2593) >= 3740
     True
+    >>> needed_precision(2833) >= 4120
+    True
     """
-    return 32 + l + l // 7 + l * l.bit_length() // 40
+    return 32 + l + l // 7 + l * l.bit_length() // 39
