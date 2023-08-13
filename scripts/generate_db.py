@@ -12,6 +12,7 @@ import argparse
 import io
 import sys
 import time
+import traceback
 
 from sage.all import primes, parallel, set_verbose
 from isogeny_weber import poldb_encode
@@ -19,7 +20,11 @@ from isogeny_weber.poldb_compute import weber_modular_poly_coeffs
 
 
 def compute_encode(l):
-    cs = weber_modular_poly_coeffs(l)
+    try:
+        cs = weber_modular_poly_coeffs(l)
+    except Exception:
+        traceback.print_exc()
+        return b"", -1
     cl = [(a, b, c) for (a, b), c in cs.items()]
     w = io.BytesIO()
     n = poldb_encode.encode_poly(w, cl, l)

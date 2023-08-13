@@ -79,13 +79,37 @@ def weber_modular_poly_coeffs(l):
     """
     Return a dictionary of coefficients for the Weber modular
     polynomial of level l.
-
-    Note: the dictionary only contains keys such that degx >= degy.
     """
+    prec = needed_precision(l)
+    while True:
+        try:
+            return _weber_modular_poly_coeffs(l, prec)
+        except PrecisionError as err:
+            # This should not happen at all but would require
+            # adjusting the precision for an actual fix.
+            import math
+            import sys
+            import traceback
+
+            traceback.print_exc()
+            print(f"PrecisionError: {err.message}", file=sys.stderr)
+            _, b = math.frexp(err.error)
+            # Retry with 32-256 additional bits
+            add = max(32, min(256, 2 * b))
+            print(f"Retrying with additional {add} bits", file=sys.stderr)
+            prec += add
+
+
+class PrecisionError(Exception):
+    def __init__(self, error, message):
+        self.error = error
+        self.message = message
+
+
+def _weber_modular_poly_coeffs(l, prec):
     eval_points = l // 24 + 1
     # We need k+1 points if 24k+1 < l
     zs, polys = [], []
-    prec = needed_precision(l)
     for i in range(eval_points):
         z, pol = eval_modular_numerical(l, 1 + QQ(i) / QQ(eval_points), prec)
         zs.append(z)
@@ -112,7 +136,8 @@ def weber_modular_poly_coeffs(l):
             # Kronecker congruence: coefficients are multiples of l.
             cz = l * (c / l).round()
             err = abs(c - cz)
-            assert err < 0.1 * l, f"{l=} deg={a},{b} err={float(err)} {c=}"
+            if err > 0.1 * l:
+                raise PrecisionError(err, f"{l=} deg={a},{b} err={float(err)} {c=}")
         cz = ZZ(cz)
         pol[(a, b)] = cz
         pol[(b, a)] = cz
@@ -175,11 +200,16 @@ def needed_precision(l):
     Modular forms are very precise in FLINT.
     But fast interpolation is not very precise, we need more bits.
 
+    The values are specific to numerical schemes used in FLINT
+    for eta evaluation and Lagrange interpolation.
+
+    Some values of l require more precision than their neighbours:
+
     >>> needed_precision(673) >= 860
     True
     >>> needed_precision(719) >= 930
     True
-    >>> needed_precision(743) >= 975
+    >>> needed_precision(743) >= 980
     True
     >>> needed_precision(1151) >= 1590
     True
@@ -191,7 +221,9 @@ def needed_precision(l):
     True
     >>> needed_precision(2593) >= 3740
     True
-    >>> needed_precision(2833) >= 4120
+    >>> needed_precision(2833) >= 4140
+    True
+    >>> needed_precision(2927) >= 4260
     True
     """
-    return 32 + l + l // 7 + l * l.bit_length() // 39
+    return max(32, l // 4 - 90) + l + l * l.bit_length() // 50
