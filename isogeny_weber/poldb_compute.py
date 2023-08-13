@@ -37,31 +37,42 @@ from sage.misc.verbose import verbose
 
 from .polynomials import real_poly_from_roots, real_poly_interpolate
 
-def compute_modular_polynomial(l, base_ring=None, y=None, coeffs=None):
-    """
-    Returns the Weber modular polynomial of level l
-    as a Sage ring element, optionally specialized for a given coefficient ring
-    or for a numerical value of the y variable.
 
-    coeffs: a dictionary returned by weber_modular_poly_coeffs
+def compute_modular_polynomial(l, base_ring=None):
+    """
+    Compute a modular polynomial as a bivariate polynomial,
+    optionally using a specific coefficient ring.
+
+    Bivariate polynomials may be suboptimal for certain uses.
     """
     from sage.rings.all import IntegerRing, PolynomialRing
 
     R = IntegerRing() if base_ring is None else base_ring
-    if coeffs is None:
-        coeffs = weber_modular_poly_coeffs(l)
-    if y is None:
-        # Bivariate
-        Rxy = PolynomialRing(R, 2, "x,y")
-        return Rxy(coeffs)
-    else:
-        # Univariate
-        Rx = PolynomialRing(R, "x")
-        plist = [R(0) for _ in range(l + 2)]
-        powers = R(y).powers(l + 2)
-        for (dx, dy), a in coeffs.items():
-            plist[dx] += a * powers[dy]
-        return Rx(plist)
+    coeffs = weber_modular_poly_coeffs(l)
+    Rxy = PolynomialRing(R, 2, "x,y")
+    return Rxy(coeffs)
+
+
+def instantiate_modular_polynomial(l, x):
+    """
+    Returns the Weber modular polynomial of level l and its 2 partial
+    derivatives, instantiated using x for the first variable,
+    as univariate polynomials over the parent ring of x.
+    """
+    R = x.parent()
+    Rx = R["x"]
+    plist = [R(0) for _ in range(l + 2)]
+    plistx = [R(0) for _ in range(l + 2)]
+    plisty = [R(0) for _ in range(l + 2)]
+    powers = R(x).powers(l + 2)
+    coeffs = weber_modular_poly_coeffs(l)
+    for (dx, dy), a in coeffs.items():
+        plist[dx] += a * powers[dy]
+        if dx > 0:
+            plistx[dx - 1] += (a * dx) * powers[dy]
+        if dy > 0:
+            plisty[dx] += (a * dy) * powers[dy - 1]
+    return Rx(plist), Rx(plistx), Rx(plisty)
 
 
 def weber_modular_poly_coeffs(l):
