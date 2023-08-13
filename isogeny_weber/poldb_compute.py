@@ -15,7 +15,7 @@ When FLINT library is enabled, this is usually 2x-3x faster than
 equivalent PARI function polmodular(l, 1)
 
 Evaluating the full polynomial for l=2493 should take a couple of minutes.
-Evaluation the full polynomial for l=4999 should take less than 1hr.
+Evaluating the full polynomial for l=4999 should take less than 1hr.
 
 Reference:
 Andreas Enge, Computing modular polynomials in quasi-linear time
@@ -52,7 +52,7 @@ def compute_weber_modular_poly(l):
         zs.append(z)
         polys.append(pol)
     verbose(
-        f"Evaluated Φ[l] at {eval_points} points {float(zs[0]):.9f}...{float(zs[-1]):.9f}",
+        f"Evaluated Φ[l] ({prec=}) at {eval_points} points {float(zs[0]):.9f}...{float(zs[-1]):.9f}",
         level=2,
     )
     pol = {}
@@ -98,11 +98,14 @@ def compute_weber_modular_poly(l):
     sgn = legendre_symbol(2, l)
     s = gcd(12, (l - 1) // 2)
     for dx, dy in list(pol):
-        if dx <= l and dy <= l and dx + dy > l + 1:
+        if dx >= dy and dx <= l and dy <= l and dx + dy > l + 1:
             dxl, dyl = l + 1 - dx, l + 1 - dy
             shift = dx + dy - (l + 1)
             b = shift // (2 * s)
-            pol[(dxl, dyl)] = ((sgn ** (b % 2)) << (b * s)) * pol[(dx, dy)]
+            coef = ((sgn ** (b % 2)) << (b * s)) * pol[(dx, dy)]
+            # Use the same object to share memory
+            pol[(dxl, dyl)] = coef
+            pol[(dyl, dxl)] = coef
     return pol
 
 

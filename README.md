@@ -114,7 +114,7 @@ or 18.3 MiB for the PARI seadata database (Atkin modular polynomials
 for `l < 500`, gzip compressed).
 
 The source code contains an inlined copy of the database for
-`l <= 127` allowing basic usage without generating a database
+`l <= 160` allowing basic usage without generating a database
 file.
 
 | Levels | Original file size (GZIP) | Encoded size |
@@ -123,6 +123,9 @@ file.
 | 5-1499 | 467 MiB | 185 MiB |
 | 1009-2039 | 1439 MiB | 574 MiB |
 | only 4999 | 366 MiB | 149 MiB |
+
+Note that the library can work without any database
+by performing necessary computations itself (see below).
 
 ## Performance
 
@@ -154,6 +157,8 @@ isogeny volcanoes to compute Weber modular polynomials.
 
 It takes a few minutes to recompute polynomials for l < 1000
 and about an hour to recompute polynomials for l < 2000.
+A regular multi-core computer can compute all polynomials for l < 5000
+in less than a day using parallelism.
 
 Note that in the case of SEA, the coefficients of Weber modular polynomials
 have approximately the same size as the base field.
