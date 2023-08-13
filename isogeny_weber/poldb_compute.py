@@ -37,11 +37,39 @@ from sage.misc.verbose import verbose
 
 from .polynomials import real_poly_from_roots, real_poly_interpolate
 
+def compute_modular_polynomial(l, base_ring=None, y=None, coeffs=None):
+    """
+    Returns the Weber modular polynomial of level l
+    as a Sage ring element, optionally specialized for a given coefficient ring
+    or for a numerical value of the y variable.
 
-def compute_weber_modular_poly(l):
+    coeffs: a dictionary returned by weber_modular_poly_coeffs
+    """
+    from sage.rings.all import IntegerRing, PolynomialRing
+
+    R = IntegerRing() if base_ring is None else base_ring
+    if coeffs is None:
+        coeffs = weber_modular_poly_coeffs(l)
+    if y is None:
+        # Bivariate
+        Rxy = PolynomialRing(R, 2, "x,y")
+        return Rxy(coeffs)
+    else:
+        # Univariate
+        Rx = PolynomialRing(R, "x")
+        plist = [R(0) for _ in range(l + 2)]
+        powers = R(y).powers(l + 2)
+        for (dx, dy), a in coeffs.items():
+            plist[dx] += a * powers[dy]
+        return Rx(plist)
+
+
+def weber_modular_poly_coeffs(l):
     """
     Return a dictionary of coefficients for the Weber modular
     polynomial of level l.
+
+    Note: the dictionary only contains keys such that degx >= degy.
     """
     eval_points = l // 24 + 1
     # We need k+1 points if 24k+1 < l

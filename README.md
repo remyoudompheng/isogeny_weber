@@ -8,6 +8,10 @@ found in:
 Andrew V. Sutherland, On the evaluation of modular polynomials,
 ANTS X, 2013 [arXiv/1202.3985](https://arxiv.org/abs/1202.3985)
 
+It also implements the computation of polynomials itself, and
+an application to counting points on elliptic curves as in the above
+article.
+
 See also:
 
 Steven Galbraith, Mathematics of public key cryptography, chapter 25
@@ -54,11 +58,12 @@ over Finite Field of size 1000000000000000000000007,
  defined by y^2 = x^3 + 257209144638154172851337*x + 673351368475851203522052
  over Finite Field of size 1000000000000000000000007]
 
+# Without database file, no isogeny check
 sage: p = next_prime(10**12)
 sage: K.<i> = GF((p,2), modulus=x^2+1)
 sage: E = EllipticCurve(K, [1+2*i, 3+4*i])
-sage: %time list(isogenies_prime_degree_weber(E, 997, weber_db=db))
-Wall time: 1min 39s
+sage: %time list(isogenies_prime_degree_weber(E, 997, check=False))
+Wall time: 37.3 s
 [Isogeny of degree 997 from Elliptic Curve defined by y^2 = x^3 + (2*i+1)*x + (4*i+3)
 over Finite Field in i of size 1000000000039^2 to Elliptic Curve defined by
 y^2 = x^3 + (327861852685*i+687173276749)*x + (678519152048*i+970771803563)
@@ -161,7 +166,9 @@ A regular multi-core computer can compute all polynomials for l < 5000
 in less than a day using parallelism.
 
 Note that in the case of SEA, the coefficients of Weber modular polynomials
-have approximately the same size as the base field.
+have approximately the same size as the base field, and computation
+of modular polynomials takes a small amount of time compared
+to determination of their roots.
 
 ## Application to point counting
 
@@ -179,3 +186,6 @@ because the f-invariant may be in a larger field extension.
 The associated extra cost is either O(l) for each prime
 (asymptotically negligible) or comparable to SEA running time
 (then it may be up to 50% of total time) when the curve has no 2-torsion point.
+
+Modular polynomials are computed on-the-fly if they are not
+supplied. The extra cost is a few percent of total running time.

@@ -17,6 +17,7 @@ from sage.all import (
     ZZ,
     cputime,
     euler_phi,
+    primes,
     factor,
     legendre_symbol,
     mod,
@@ -29,6 +30,7 @@ from sage.all import (
 from sage.misc.verbose import verbose
 
 from .poldb import Database
+from .poldb_compute import compute_modular_polynomial, weber_modular_poly_coeffs
 from .polynomials import (
     frobenius_mod,
     fast_adams_operator,
@@ -39,14 +41,17 @@ from .polynomials import (
     inv_trunc,
 )
 
+_builtin_database = Database()
 
-def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=True):
+def isogenies_prime_degree_weber(E, l, weber_db=None, only_j=False, check=True):
     """
     Returns an iterator over outgoing isogenies of degree l
     with domain E.
 
     l must be a prime level in the Weber modular polynomial
     database (usually l < 1000).
+
+    check: run the expensive check in isogeny constructor (default=True)
     """
     if not ZZ(l).is_prime():
         raise ValueError(f"degree {l} is not prime")
@@ -58,6 +63,8 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
         raise ValueError(f"j-invariant must not be 0 or 1728")
     if K.characteristic() <= 4 * l:
         raise ValueError(f"Characteristic is too small (needs char K > 4l)")
+    if weber_db is None:
+        weber_db = _builtin_database
 
     A, B = E.a4(), E.a6()
     x = polygen(K)
@@ -84,8 +91,14 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
     assert f is not None and eqf24(f**24) == 0
     verbose(f"domain j={j}")
     verbose(f"f-invariant in field {Kext}")
-    wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
     t0 = cputime()
+    if l in weber_db:
+        wxy = None
+        wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
+    else:
+        wxy = weber_modular_poly_coeffs(l)
+        wp = compute_modular_polynomial(l, base_ring=Kext, y=f, coeffs=wxy)
+        verbose(f"Computed modular polynomial of level {l}", t=t0)
     roots = list(_weber_poly_roots(wp, K, f, j))
     verbose(f"{len(roots)} roots for modular equation of degree {wp.degree()}", t=t0)
     for f2, j2, mult in roots:
@@ -105,7 +118,10 @@ def isogenies_prime_degree_weber(E, l, weber_db=Database(), only_j=False, check=
             #
             # The derivative j'(f)/j(f) = 3 * 24 f^23 / (f^24 - 16) - 24 / f
             # f j'(f) = 72 (f^24 - 16)^2 - 24 j(g)
-            wx = weber_db.modular_polynomial(l, base_ring=Kext, y=f2)
+            if wxy is not None:
+                wx = compute_modular_polynomial(l, base_ring=Kext, y=f2, coeffs=wxy)
+            else:
+                wx = weber_db.modular_polynomial(l, base_ring=Kext, y=f2)
             phix = wx.derivative()(f) * (3 * (f2_24 - 16) ** 2 - j2) / f2
             phiy = wp.derivative()(f2) * (3 * (f**24 - 16) ** 2 - j) / f
             jj = 18 * B / A * j
@@ -338,7 +354,7 @@ def _fast_elkies(E1, E2, l):
 # https://hal.science/inria-00001009
 
 
-def trace_of_frobenius(E, weber_db=Database(), threads=1):
+def trace_of_frobenius(E, weber_db=_builtin_database, threads=1):
     """
     Compute the trace of Frobenius endomorphism for curve E
     defined over a prime field, as an element of Z.
@@ -346,7 +362,7 @@ def trace_of_frobenius(E, weber_db=Database(), threads=1):
     Only curves over GF(p) where p is prime (not a prime power)
     are supported.
     """
-    t_start = cputime()
+    t_start = time.time()
     K = E.base_ring()
     p = K.characteristic()
     if not K.is_field() or not K.is_finite() or K.degree() > 1:
@@ -448,9 +464,8 @@ def trace_of_frobenius(E, weber_db=Database(), threads=1):
         crt_vals.append(t2)
 
     target = 4 * (K.order().isqrt() + 1)
-    ls = sorted(weber_db.keys())
-    if prod(ls) < target:
-        raise ValueError(f"not enough modular polynomials for {p.bit_length()}-bit p")
+    ls = list(primes(5, p.bit_length()))
+    assert prod(ls).isqrt() >= target
 
     args = [(E, l, f, K, Kext, weber_db) for l in ls]
     for lidx, (_, (l, traces, j2s)) in enumerate(
@@ -539,7 +554,13 @@ def trace_of_frobenius(E, weber_db=Database(), threads=1):
 
 def trace_of_frobenius_modl(E, l, f, K, Kext, weber_db):
     t0 = cputime()
-    wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
+    if l in weber_db:
+        wxy = None
+        wp = weber_db.modular_polynomial(l, base_ring=Kext, y=f)
+    else:
+        wxy = weber_modular_poly_coeffs(l)
+        wp = compute_modular_polynomial(l, base_ring=Kext, y=f, coeffs=wxy)
+        verbose(f"Computed modular polynomial of level {l}", t=t0, level=2)
     roots, wdescent, wfrob = _weber_poly_roots_frobenius(wp, K, f)
     p = K.characteristic()
     verbose(f"{len(roots)} roots for modular equation at level {l}", t=t0, level=2)
@@ -548,7 +569,7 @@ def trace_of_frobenius_modl(E, l, f, K, Kext, weber_db):
         return l, None, j2s
     if len(roots) == 2:
         r = None
-        tr = elkies_trace(E, l, f, wp, roots, weber_db)
+        tr = elkies_trace(E, l, f, wp, roots, weber_db, wxy=wxy)
         verbose(f"processed Elkies prime {l} (trace={tr})", t=t0)
         return l, [tr], j2s
     elif len(roots) == 0:
@@ -581,7 +602,7 @@ def trace_of_frobenius_modl(E, l, f, K, Kext, weber_db):
         else:
             verbose(f"Double root: t^2 - 4p is divisible by {l}", t=t0, level=2)
             r = 1
-        tr = elkies_trace(E, l, f, wp, roots, weber_db)
+        tr = elkies_trace(E, l, f, wp, roots, weber_db, wxy=wxy)
         verbose(f"processed Elkies prime {l} (trace={tr}, double root)", t=t0)
         return l, [tr], j2s
     else:
@@ -802,7 +823,7 @@ def match_atkin(bound, crtmod, crtval, atk_primes, atk_traces: dict):
     return matches
 
 
-def elkies_trace(E, l, f, wp, roots, weber_db):
+def elkies_trace(E, l, f, wp, roots, weber_db, wxy=None):
     """
     Compute Frobenius trace on isogeny kernel
 
@@ -817,7 +838,10 @@ def elkies_trace(E, l, f, wp, roots, weber_db):
 
     # Only one eigenvalue is needed
     f2, j2 = roots[0]
-    wx = weber_db.modular_polynomial(l, base_ring=Kext, y=f2)
+    if wxy is not None:
+        wx = compute_modular_polynomial(l, base_ring=Kext, y=f2, coeffs=wxy)
+    else:
+        wx = weber_db.modular_polynomial(l, base_ring=Kext, y=f2)
     phix = wx.derivative()(f) * (3 * (f2**24 - 16) ** 2 - j2) / f2
     phiy = wp.derivative()(f2) * (3 * (f**24 - 16) ** 2 - j) / f
     jj = 18 * B / A * j

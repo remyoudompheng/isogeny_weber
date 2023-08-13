@@ -134,6 +134,9 @@ class Database:
             poly[(dx, dy)] = a
         return Zxy(poly)
 
+    def __contains__(self, l):
+        return l in self._offs
+
     def keys(self):
         return self._offs.keys()
 

@@ -15,11 +15,11 @@ import time
 
 from sage.all import primes, parallel, set_verbose
 from isogeny_weber import poldb_encode
-from isogeny_weber.poldb_compute import compute_weber_modular_poly
+from isogeny_weber.poldb_compute import weber_modular_poly_coeffs
 
 
 def compute_encode(l):
-    cs = compute_weber_modular_poly(l)
+    cs = weber_modular_poly_coeffs(l)
     cl = [(a, b, c) for (a, b), c in cs.items()]
     w = io.BytesIO()
     n = poldb_encode.encode_poly(w, cl, l)
