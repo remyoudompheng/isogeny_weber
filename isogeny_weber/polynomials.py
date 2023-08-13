@@ -136,34 +136,38 @@ def fast_adams_operator(p, k):
     Apply transformation x -> x^k (Graeffe transform) to roots of polynomial
     This is equivalent to p.adams_operator(k), but faster.
 
-    The complexity is quasi-linear w.r.t. degree of p.
-
-    See https://doi.org/10.1016/j.jsc.2005.07.001
-    Bostan, Flajolet, Salvy, Schost, Fast computation of special resultants
+    The prime factors of k must be only 2 and 3.
     """
     d = p.degree()
     assert p.is_monic()
-    assert p.base_ring().characteristic() > d
-    assert p[0] != 0
     R = p.parent()
-    # Build Newton series Sum(sum(root^k) t^k) = dP / P
-    newton = p.derivative().reverse() * p.reverse().inverse_series_trunc(k * d + 1)
-    # Extract Newton sums where exponent is a multiple of k
-    # Reconstruct polynomial using exp(integral dP/P) = P
-    f = R([-newton[k * i] for i in range(1, d + 1)])
-    # result = f.integral().add_bigoh(d + 1).exp(prec=d + 1)
-    # Handmade Newton iteration following section 2.2.1 of BFSS paper
-    res = 1 + f[0] * R.gen()
-    prec = 2
-    while prec <= d:
-        # m_ is very small
-        m_ = f - res.derivative() * res.inverse_series_trunc(2 * prec)
-        m = 1 + m_.truncate(2 * prec).integral()
-        res = (res * m).truncate(2 * prec)
-        prec = 2 * prec
-    result = res.truncate(d + 1).reverse()
-    assert result.degree() == d
-    return result
+    x = R.gen()
+    # The Graeffe transform of order 2 satisfies:
+    # Q(x²)=±P(x)P(-x)
+    # so Q = ±(P0²-xP1²) if P = P0(x²) + x P1(x²)
+    while k % 2 == 0:
+        ps = p.list()
+        p0 = R(ps[0::2])
+        p1 = R(ps[1::2])
+        if p.degree() % 2 == 0:
+            p = p0**2 - x * p1**2
+        else:
+            p = x * p1**2 - p0**2
+        k //= 2
+    # The Graeffe transform of order 3 satisfies:
+    # Q(x³) = j^k P(x)P(jx)P(j²x) where j is a cubic root of 1
+    # so Q = P0³ + x P1³ + x² P2³ - 3x P0 P1 P2
+    # if P = P0(x³) + x P1(x³) + x² P2(x³)
+    while k % 3 == 0:
+        ps = p.list()
+        p0 = R(ps[0::3])
+        p1 = R(ps[1::3])
+        p2 = R(ps[2::3])
+        p = p0**3 + x * p1**3 + x**2 * p2**3 - 3 * x * p0 * p1 * p2
+        k //= 3
+    assert k == 1
+    assert p.is_monic()
+    return p
 
 
 def xp_from_cubicp(h, cubic_p, a, b):
@@ -305,7 +309,9 @@ class Poly3Ring:
             return None
         return root % self.h
 
+
 # Floating-point real/complex polynomials
+
 
 def real_poly_from_roots(rs, cs):
     """
@@ -318,8 +324,9 @@ def real_poly_from_roots(rs, cs):
     else:
         R, x = PolynomialRing(rs[0].parent(), "x").objgen()
         factors = [x - t for t in rs]
-        factors += [x*x - 2*r.real()*x + R(r.mid().norm()) for r in cs]
+        factors += [x * x - 2 * r.real() * x + R(r.mid().norm()) for r in cs]
         return prod(factors)
+
 
 def real_poly_interpolate(xs, ys):
     if _flintext is not None:
@@ -327,4 +334,3 @@ def real_poly_interpolate(xs, ys):
     else:
         Rx = xs[0].parent()["x"]
         return Rx.lagrange_polynomial(list(zip(xs, ys)))
-
