@@ -59,3 +59,6 @@ test_123456(9001, -127)
 # Duplicate isogenies for l=5, 13, 17...
 # The discriminant is -D^2
 test_123456(3733, -44)
+
+# Fails a sanity check: product(primes(5, bit_length)) >= 4 sqrt(p)
+test_123456(557125316788065911, 269768565)

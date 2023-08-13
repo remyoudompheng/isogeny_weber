@@ -459,7 +459,7 @@ def trace_of_frobenius(E, weber_db=_builtin_database, threads=1):
         crt_vals.append(t2)
 
     target = 4 * (K.order().isqrt() + 1)
-    ls = list(primes(5, p.bit_length()))
+    ls = list(primes(5, 2 * p.bit_length()))
     assert prod(ls).isqrt() >= target
 
     args = [(E, l, f, K, Kext, weber_db) for l in ls]
