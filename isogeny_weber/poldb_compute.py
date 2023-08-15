@@ -49,9 +49,21 @@ def compute_modular_polynomial(l, base_ring=None):
 
     R = IntegerRing() if base_ring is None else base_ring
     coeffs = weber_modular_poly_coeffs(l)
+    # Complete symmetry
+    sgn = legendre_symbol(2, l)
+    s = gcd(12, (l - 1) // 2)
+    for dx, dy in list(coeffs):
+        if dx >= dy and dx <= l and dy <= l and dx + dy > l + 1:
+            dxl, dyl = l + 1 - dx, l + 1 - dy
+            shift = dx + dy - (l + 1)
+            b = shift // (2 * s)
+            coef = ((sgn ** (b % 2)) << (b * s)) * coeffs[(dx, dy)]
+            # Use the same object to share memory
+            coeffs[(dxl, dyl)] = coef
+            coeffs[(dyl, dxl)] = coef
+
     Rxy = PolynomialRing(R, 2, "x,y")
     return Rxy(coeffs)
-
 
 def instantiate_modular_polynomial(l, x):
     """
@@ -66,21 +78,38 @@ def instantiate_modular_polynomial(l, x):
     plisty = [R(0) for _ in range(l + 2)]
     powers = R(x).powers(l + 2)
     coeffs = weber_modular_poly_coeffs(l)
+
+    sgn = legendre_symbol(2, l)
+    s = gcd(12, (l - 1) // 2)
+
     for (dx, dy), a in coeffs.items():
         plist[dx] += a * powers[dy]
         if dx > 0:
             plistx[dx - 1] += (a * dx) * powers[dy]
         if dy > 0:
             plisty[dx] += (a * dy) * powers[dy - 1]
-    return Rx(plist), Rx(plistx), Rx(plisty)
+        # Apply symmetry Phi(2^1/4 x, 2^1/4 y) has doubly symmetric coefficients
+        if dx <= l and dy <= l and dx + dy > l + 1:
+            dxl, dyl = l + 1 - dx, l + 1 - dy
+            shift = dx + dy - (l + 1)
+            b = shift // (2 * s)
+            al = ((sgn ** (b % 2)) << (b * s)) * coeffs[(dx, dy)]
+            plist[dxl] += al * powers[dyl]
+            if dxl > 0:
+                plistx[dxl - 1] += (a * dxl) * powers[dyl]
+            if dyl > 0:
+                plisty[dxl] += (a * dyl) * powers[dyl - 1]
 
+    return Rx(plist), Rx(plistx), Rx(plisty)
 
 def weber_modular_poly_coeffs(l):
     """
     Return a dictionary of coefficients for the Weber modular
     polynomial of level l.
+
+    This dictionary omits coefficients with total degree less than (l+1)//2
     """
-    prec = needed_precision(l)
+    prec = required_precision(l)
     while True:
         try:
             return _weber_modular_poly_coeffs(l, prec)
@@ -107,11 +136,23 @@ class PrecisionError(Exception):
 
 
 def _weber_modular_poly_coeffs(l, prec):
-    eval_points = l // 24 + 1
+    """
+    Compute the Weber modular polynomial of level l.
+
+    The memory storage requirement is:
+      ~l²/48 real numbers at precision l
+      ~l²/96 integers of size l
+    so usually only suitable for l < 10000
+    """
+    eval_points = l // 48 + 1
+    R = RealField(prec)
     # We need k+1 points if 24k+1 < l
+    # To improve numerical stability we want the values of Weber to be
+    # regularly spaced: since we choose them close to the extremum
+    # the argument should be 1 + sqrt(kε)
     zs, polys = [], []
     for i in range(eval_points):
-        z, pol = eval_modular_numerical(l, 1 + QQ(i) / QQ(eval_points), prec)
+        z, pol = eval_modular_numerical(l, 1 + (R(i + 1) / R(10 * eval_points)).sqrt(), prec)
         zs.append(z)
         polys.append(pol)
     verbose(
@@ -122,10 +163,10 @@ def _weber_modular_poly_coeffs(l, prec):
     pol[(l + 1, 0)] = ZZ(1)
     pol[(0, l + 1)] = ZZ(1)
 
-    R = RealField(prec)
+    RB = zs[0].parent()
 
-    def setc(a, b, c):
-        c = R(c)
+    def setc(a, b, cc):
+        c = R(cc)
         if (a, b) == (l, l):
             cz = c.round()
             assert cz == -1
@@ -133,43 +174,56 @@ def _weber_modular_poly_coeffs(l, prec):
             cz = c.round()
             assert cz.abs() & (cz.abs() - 1) == 0
         else:
+            if cc.diameter() > 0.1 * l:
+                raise PrecisionError(cc.diameter(), f"{l=} deg={a},{b} err={cc.diameter()} {c=}")
             # Kronecker congruence: coefficients are multiples of l.
             cz = l * (c / l).round()
-            err = abs(c - cz)
-            if err > 0.1 * l:
-                raise PrecisionError(err, f"{l=} deg={a},{b} err={float(err)} {c=}")
         cz = ZZ(cz)
         pol[(a, b)] = cz
         pol[(b, a)] = cz
 
-    # We only iterate on degrees >= (l+1)/2 because we can fill
-    # half of coefficients using the degree symmetry.
-    # We still have 2x "too much" data because of the X,Y symmetry.
-    z24s = [z**24 for z in zs]
-    for a in range((l + 1) // 2, l + 1):
-        bs = [_b for _b in range(1, l + 1) if (l * a + _b) % 24 == (l + 1) % 24]
-        if not bs:
-            continue
-        # Solve
-        # sum(bs[i] * z^(24i+j)) = c
-        interp = real_poly_interpolate(
-            z24s, [(pol[a] / z ** bs[0]) for z, pol in zip(zs, polys)]
-        )
-        for i, b in enumerate(bs):
-            if a + b >= l + 1:
-                setc(a, b, interp[i])
-    # Complete symmetry
     sgn = legendre_symbol(2, l)
     s = gcd(12, (l - 1) // 2)
-    for dx, dy in list(pol):
-        if dx >= dy and dx <= l and dy <= l and dx + dy > l + 1:
-            dxl, dyl = l + 1 - dx, l + 1 - dy
-            shift = dx + dy - (l + 1)
-            b = shift // (2 * s)
-            coef = ((sgn ** (b % 2)) << (b * s)) * pol[(dx, dy)]
-            # Use the same object to share memory
-            pol[(dxl, dyl)] = coef
-            pol[(dyl, dxl)] = coef
+    # We only iterate on degrees <= (l+1)/2 because we can fill
+    # half of coefficients using the degree symmetry.
+    # We use the degree symmetry to "duplicate" evaluation data.
+    z24s = [z**24 for z in zs]
+    for a in range(1, (l + 1) // 2 + 1):
+        # Exponents of y are b0, b0+24, etc.
+        # The coefficient of x^a is sum(cj y^(b0+24j)) = y^b0 P(y^24)
+        b0 = (l + 1 - l * a) % 24
+        bs = [_b for _b in range(b0, l + 1, 24)]
+        if not bs:
+            continue
+        # The coefficient of x^(l+1-a) is y^(l+1-b0) Q(1/y^24)
+        # where P and Q are related by P(2^12 x) = pm 2^K Q(x)
+        shift = l + 1 - (a + b0)
+        bb = shift // (2 * s)
+        # Gather values of Q from degree l+1-a
+        xs = [1 / z for z in z24s]
+        ys = [cpol[l + 1 - a] / z ** (l + 1 - b0) for z, cpol in zip(zs, polys)]
+        # Gather values of Q from degree a
+        if len(xs) < len(bs):
+            # Q(z^24/2^12) = coeff[a] / z^b0 / pm 2^K
+            const = 1 / RB(sgn ** (a % 2) * 2 ** (bb * s))
+            xs += [z / 4096 for z in z24s]
+            ys += [const * cpol[a] / z**b0 for z, cpol in zip(zs, polys)]
+        if len(xs) > len(bs):
+            xs = xs[: len(bs)]
+            ys = ys[: len(bs)]
+        assert len(xs) == len(bs)
+        interp = real_poly_interpolate(xs, ys, algorithm="newton")
+        if a == (l + 1) // 2:
+            eps = interp[len(bs) // 2].diameter()
+            _, _m, _e = eps.sign_mantissa_exponent()
+            eff_prec = -(_e + _m.bit_length())
+            verbose(f"final extra precision {eff_prec} bits ({eps})", level=2)
+        for i, b in enumerate(bs):
+            if a + b <= l + 1:
+                setc(l + 1 - a, l + 1 - b, interp[i])
+        # Free memory
+        for cpol in polys:
+            cpol[a], cpol[l + 1 - a] = None, None
     return pol
 
 
@@ -177,6 +231,8 @@ def eval_modular_numerical(l, s, prec):
     """
     Evaluate a modular polynomial at ft=f(t=is) using floating-point
     complex numbers.
+
+    Returns a monic polynomial of degree l+1
     """
     CC = ComplexBallField(prec)
     zeta = CC(ComplexField(prec).zeta(48).conjugate())
@@ -192,38 +248,49 @@ def eval_modular_numerical(l, s, prec):
     r2 = weberf(t / l).real()
     cs = [weberf(CC(48 * a, s) / l) for a in range(1, (l + 1) // 2)]
     poly = real_poly_from_roots([r1, r2], cs)
-    return ft, poly
+    return ft, poly.list()
 
 
-def needed_precision(l):
+def required_precision(l):
     """
     Modular forms are very precise in FLINT.
-    But fast interpolation is not very precise, we need more bits.
+    But interpolation is not numerically stable.
 
-    The values are specific to numerical schemes used in FLINT
-    for eta evaluation and Lagrange interpolation.
+    The following bounds were determined experimentally
+    by running the computation for l < 5000
+    using FLINT-ARB 2.23 `arb_poly_interpolate_newton`
 
     Some values of l require more precision than their neighbours:
 
-    >>> needed_precision(673) >= 860
+    >>> required_precision(229) >= 310
     True
-    >>> needed_precision(719) >= 930
+    >>> required_precision(379) >= 500
     True
-    >>> needed_precision(743) >= 980
+    >>> required_precision(599) >= 800
     True
-    >>> needed_precision(1151) >= 1590
+    >>> required_precision(743) >= 1000
     True
-    >>> needed_precision(1297) >= 1800
+    >>> required_precision(769) >= 1050
     True
-    >>> needed_precision(1511) >= 2120
+    >>> required_precision(1151) >= 1650
     True
-    >>> needed_precision(1609) >= 2250
+    >>> required_precision(1297) >= 1850
     True
-    >>> needed_precision(2593) >= 3740
+    >>> required_precision(1439) >= 2050
     True
-    >>> needed_precision(2833) >= 4140
+    >>> required_precision(1657) >= 2300
     True
-    >>> needed_precision(2927) >= 4260
+    >>> required_precision(2221) >= 3180
+    True
+    >>> required_precision(2377) >= 3400
+    True
+    >>> required_precision(2617) >= 3750
+    True
+    >>> required_precision(2833) >= 4140
+    True
+    >>> required_precision(2999) >= 4300
+    True
+    >>> required_precision(3169) >= 4500
     True
     """
-    return max(32, l // 4 - 90) + l + l * l.bit_length() // 50
+    return 32 + int(l * 1.4) + l * l.bit_length() // 200

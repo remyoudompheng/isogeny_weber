@@ -14,14 +14,16 @@ import sys
 import time
 import traceback
 
-from sage.all import primes, parallel, set_verbose
+from sage.all import cputime, primes, parallel, set_verbose
 from isogeny_weber import poldb_encode
 from isogeny_weber.poldb_compute import weber_modular_poly_coeffs
 
 
 def compute_encode(l):
     try:
+        t = cputime()
         cs = weber_modular_poly_coeffs(l)
+        print(f"Computed modular polynomial {l=} in {cputime(t):.3f}s")
     except Exception:
         traceback.print_exc()
         return b"", -1

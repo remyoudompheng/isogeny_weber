@@ -22,8 +22,10 @@ cdef extern from "arb_wrap.h":
     void arb_poly_get_coeff_arb(arb_t v, const arb_poly_t poly, long n)
     void arb_poly_product_roots_complex(arb_poly_t poly, arb_srcptr r, long rn, acb_srcptr c, long cn, long prec)
     void arb_poly_interpolate_fast(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
+    void arb_poly_interpolate_barycentric(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
+    void arb_poly_interpolate_newton(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
 
-def rx_interpolate(xs, ys):
+def rx_interpolate(xs, ys, algorithm="fast"):
     """
     Returns the Lagrange interpolation polynomials
     for a list of points (x,y)
@@ -42,7 +44,12 @@ def rx_interpolate(xs, ys):
         arb_set(&rxs[i], (<RealBall>xs[i]).value)
         arb_set(&rys[i], (<RealBall>ys[i]).value)
     sig_on()
-    arb_poly_interpolate_fast(poly, rxs, rys, n, prec)
+    if algorithm == "barycentric":
+        arb_poly_interpolate_barycentric(poly, rxs, rys, n, prec)
+    elif algorithm == "newton":
+        arb_poly_interpolate_newton(poly, rxs, rys, n, prec)
+    else:
+        arb_poly_interpolate_fast(poly, rxs, rys, n, prec)
     sig_off()
     _arb_vec_clear(rxs, n)
     _arb_vec_clear(rys, n)

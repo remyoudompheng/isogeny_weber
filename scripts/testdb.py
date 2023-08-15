@@ -4,9 +4,13 @@ linked by the modular polynomials.
 
 This is equivalent to finding coordinates of points
 of modular curves modulo random primes.
+
+If a numerical argument MAXL is supplied, polynomials will be computed
+on-the-fly.
 """
 
 import argparse
+import os
 import time
 
 from sage.all import (
@@ -15,6 +19,7 @@ from sage.all import (
     random_prime,
     legendre_symbol,
     set_verbose,
+    primes
 )
 from isogeny_weber import Database, isogenies_prime_degree_weber
 
@@ -23,14 +28,19 @@ if __name__ == "__main__":
     argp.add_argument("-v", action="store_true")
     argp.add_argument("--fast", action="store_true")
     argp.add_argument("PBITS", type=int, help="modulus size")
-    argp.add_argument("DATABASE", nargs="?", help="Path to Weber polynomial database")
+    argp.add_argument(metavar="MAXL|DATABASE", dest="database", nargs="?", help="Path to Weber polynomial database")
     args = argp.parse_args()
 
     if args.v:
         set_verbose(1)
-    weber_db = Database(args.DATABASE)
+    if args.database.isdigit():
+        weber_db = Database()
+        ls = primes(5, int(args.database) + 1)
+    else:
+        weber_db = Database(args.database)
+        ls = list(weber_db.keys())
 
-    for l in weber_db.keys():
+    for l in ls:
         t0 = time.time()
         print("Random moduli:", end=" ")
         points = 0

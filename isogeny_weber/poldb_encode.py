@@ -29,7 +29,7 @@ Coefficients satisfy:
   coefficients c+ = [(l+1)/2+dx,(l+1)/2+dy]
   and c- = [(l+1)/2-dx,(l+1)/2-dy]
   with total degree l+1+2bs and l+1-2bs
-  are such that c- = (±2^s)^b when the sign is given by
+  are such that c- = (±2^s)^b c+ when the sign is given by
   the Legendre symbol (2|l)
   Usually c+ has low 2-valuation.
 

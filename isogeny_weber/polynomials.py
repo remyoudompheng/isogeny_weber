@@ -328,9 +328,9 @@ def real_poly_from_roots(rs, cs):
         return prod(factors)
 
 
-def real_poly_interpolate(xs, ys):
+def real_poly_interpolate(xs, ys, algorithm=None):
     if _flintext is not None:
-        return _flintext.rx_interpolate(xs, ys)
+        return _flintext.rx_interpolate(xs, ys, algorithm=algorithm)
     else:
         Rx = xs[0].parent()["x"]
         return Rx.lagrange_polynomial(list(zip(xs, ys)))
