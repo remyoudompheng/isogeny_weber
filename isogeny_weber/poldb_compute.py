@@ -96,9 +96,9 @@ def instantiate_modular_polynomial(l, x):
             al = ((sgn ** (b % 2)) << (b * s)) * coeffs[(dx, dy)]
             plist[dxl] += al * powers[dyl]
             if dxl > 0:
-                plistx[dxl - 1] += (a * dxl) * powers[dyl]
+                plistx[dxl - 1] += (al * dxl) * powers[dyl]
             if dyl > 0:
-                plisty[dxl] += (a * dyl) * powers[dyl - 1]
+                plisty[dxl] += (al * dyl) * powers[dyl - 1]
 
     return Rx(plist), Rx(plistx), Rx(plisty)
 
