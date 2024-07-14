@@ -4,26 +4,16 @@ Extra FLINT ARB bindings for interpolation of real polynomials
 
 from cysignals.memory cimport sig_malloc, sig_free
 from cysignals.signals cimport sig_on, sig_off
-from sage.libs.arb.acb cimport acb_set, _acb_vec_init, _acb_vec_clear
-from sage.libs.arb.acb_poly cimport acb_poly_product_roots
-from sage.libs.arb.arb cimport arb_set
-from sage.libs.arb.types cimport acb_ptr, acb_srcptr, acb_struct, arb_srcptr, arb_ptr, arb_poly_t, arb_t
+from sage.libs.flint.acb cimport acb_set, _acb_vec_init, _acb_vec_clear
+from sage.libs.flint.acb_poly cimport acb_poly_product_roots
+from sage.libs.flint.arb cimport arb_set, _arb_vec_init, _arb_vec_clear
+from sage.libs.flint.arb_poly cimport arb_poly_init, arb_poly_clear, arb_poly_get_coeff_arb, arb_poly_product_roots_complex, arb_poly_interpolate_fast, arb_poly_interpolate_barycentric, arb_poly_interpolate_newton
+from sage.libs.flint.types cimport acb_ptr, acb_srcptr, acb_struct, arb_srcptr, arb_ptr, arb_poly_t, arb_t
 from sage.rings.complex_arb cimport ComplexBall
 from sage.rings.real_arb cimport RealBall
 from sage.rings.polynomial.polynomial_complex_arb cimport Polynomial_complex_arb
 from sage.rings.all import ComplexBallField
 
-cdef extern from "arb_wrap.h":
-    arb_ptr _arb_vec_init(long n)
-    void _arb_vec_clear(arb_ptr v, long n)
-
-    void arb_poly_init(arb_poly_t poly)
-    void arb_poly_clear(arb_poly_t poly)
-    void arb_poly_get_coeff_arb(arb_t v, const arb_poly_t poly, long n)
-    void arb_poly_product_roots_complex(arb_poly_t poly, arb_srcptr r, long rn, acb_srcptr c, long cn, long prec)
-    void arb_poly_interpolate_fast(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
-    void arb_poly_interpolate_barycentric(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
-    void arb_poly_interpolate_newton(arb_poly_t poly, arb_srcptr xs, arb_srcptr ys, long n, long prec)
 
 def rx_interpolate(xs, ys, algorithm="fast"):
     """
@@ -112,7 +102,7 @@ def cx_from_roots(croots):
     for i from 0 <= i < n:
         acb_set(&rs[i], (<ComplexBall>croots[i]).value)
     sig_on()
-    acb_poly_product_roots((<Polynomial_complex_arb>poly).__poly, <acb_srcptr>rs, n, prec)
+    acb_poly_product_roots((<Polynomial_complex_arb>poly)._poly, <acb_srcptr>rs, n, prec)
     sig_off()
     _acb_vec_clear(rs, n)
     return poly
